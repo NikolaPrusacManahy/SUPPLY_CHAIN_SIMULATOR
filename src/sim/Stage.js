@@ -1,12 +1,18 @@
 export class Stage {
-  constructor({ id, name, stock = 0, leadTime = 2, targetStock = 60,
-                holdingCost = 0.5, backlogCost = 2, infinite = false, lostSales = false }) {
-    Object.assign(this, { id, name, stock, leadTime, targetStock,
-                          holdingCost, backlogCost, infinite, lostSales });
+  constructor({ id, name, leadTime = 2, expectedDemand = 20, safetyDays = 1,
+                targetStock, stock, holdingCost = 0.5, backlogCost = 2,
+                infinite = false, lostSales = false, policy = 'forecast', alpha = 0.25 }) {
+    Object.assign(this, { id, name, leadTime, safetyDays, holdingCost,
+                          backlogCost, infinite, lostSales, policy, alpha });
+    this.forecast = expectedDemand;
+    // Enough to cover the lead time, today, and some safety days
+    this.targetStock = targetStock ?? Math.round(expectedDemand * (leadTime + 1 + safetyDays));
+    this.stock = infinite ? 0 : (stock ?? this.targetStock);
+
     this.backlog = 0;        // units owed downstream (not used if lostSales)
     this.lastLost = 0;       // customers turned away today (retailer only)
     this.onOrder = 0;        // ordered upstream, not yet arrived
-    this.inTransit = [];     // shipments heading to us: { qty, arrivesOn }
+    this.inTransit = [];     // shipments heading to us: { qty, departedOn, arrivesOn }
     this.incomingOrder = 0;
     this.lastOrder = 0;
     this.lastShipped = 0;
@@ -54,8 +60,16 @@ export class Stage {
     }
   }
 
+  // Exponential smoothing: forecast moves a fraction (alpha) toward each new order
+  observeDemand(qty) {
+    this.forecast = this.alpha * qty + (1 - this.alpha) * this.forecast;
+  }
+
   autoOrderQty() {
-    return Math.max(0, this.targetStock - this.inventoryPosition);
+    const target = this.policy === 'forecast'
+      ? Math.round(this.forecast * (this.leadTime + 1 + this.safetyDays))
+      : this.targetStock;
+    return Math.max(0, target - this.inventoryPosition);
   }
 
   placeOrder(qty) {

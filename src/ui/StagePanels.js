@@ -40,15 +40,26 @@ export class StagePanels {
           <dt>Stock</dt><dd data-stock></dd>
           <dt>${shortLabel}</dt><dd data-short></dd>
           <dt>On order</dt><dd data-onorder></dd>
+          <dt>Forecast</dt><dd data-forecast></dd>
           <dt>Ordered today</dt><dd data-ordered></dd>
           <dt>Total cost</dt><dd data-cost></dd>
         </dl>
-        <label><input type="checkbox" data-auto checked /> Auto order</label>
+        <label>Ordering
+          <select data-mode>
+            <option value="forecast">Auto: forecast</option>
+            <option value="basestock">Auto: fixed target</option>
+            <option value="manual">Manual</option>
+          </select>
+        </label>
         <label>Order qty <input type="number" data-qty min="0" step="1" value="20" disabled /></label>`;
 
-      const auto = card.querySelector('[data-auto]');
+      const mode = card.querySelector('[data-mode]');
       const qty = card.querySelector('[data-qty]');
-      auto.addEventListener('change', () => { qty.disabled = auto.checked; });
+      mode.value = stage.policy;
+      mode.addEventListener('change', () => {
+        qty.disabled = mode.value !== 'manual';
+        if (mode.value !== 'manual') stage.policy = mode.value;
+      });
     }
 
     this.cards.set(stage.id, card);
@@ -68,13 +79,13 @@ export class StagePanels {
     return card;
   }
 
-  // Manual orders for stages where Auto is switched off
+  // Manual orders for stages set to "Manual"
   getPlayerOrders() {
     const orders = {};
     for (const stage of this.stages) {
       const card = this.cards.get(stage.id);
-      const auto = card.querySelector('[data-auto]');
-      if (!auto || auto.checked) continue;
+      const mode = card.querySelector('[data-mode]');
+      if (!mode || mode.value !== 'manual') continue;
       const value = Math.floor(Number(card.querySelector('[data-qty]').value));
       orders[stage.id] = Number.isFinite(value) && value > 0 ? value : 0;
     }
@@ -97,6 +108,7 @@ export class StagePanels {
         set('stock', fmt(stage.stock));
         set('short', fmt(shortage));
         set('onorder', fmt(stage.onOrder));
+        set('forecast', fmt(stage.forecast));
         set('ordered', fmt(stage.lastOrder));
         set('cost', `€${fmt(stage.totalCost)}`);
         card.classList.toggle('warning', shortage > 0);

@@ -42,3 +42,6 @@ button.active { background: #222; color: #fff; border-color: #222; }
 .world-label { background: rgba(255, 255, 255, 0.9); padding: 2px 8px; border-radius: 6px;
                font-size: 13px; font-weight: 600; white-space: nowrap; }
 .world-label.alert { background: #e24b4a; color: #fff; }
+.event { background: #faeeda; color: #633806; padding: 2px 10px; border-radius: 6px; }
+.event:empty { display: none; }
+.card select { font: inherit; padding: 2px 4px; }

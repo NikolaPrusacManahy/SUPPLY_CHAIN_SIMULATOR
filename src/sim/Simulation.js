@@ -1,4 +1,5 @@
 import { createRng } from './random.js';
+import { generateEvents } from './events.js';
 
 export class Simulation {
   // stages ordered downstream -> upstream: retailer first, supplier last
@@ -12,6 +13,7 @@ export class Simulation {
     Object.assign(this, { demandMean, demandSpread, seed,
                           salePrice, rawCost, maxDays });
     this.rng = createRng(seed);
+    this.events = generateEvents(this.rng, maxDays);
     this.day = 0;
     this.cash = startCash;
     this.lastDemand = 0;
@@ -28,20 +30,30 @@ export class Simulation {
     return this.day >= this.maxDays;
   }
 
-  customerDemand() {
+  eventOn(day) {
+    return this.events.find((e) => day >= e.startDay && day <= e.endDay) ?? null;
+  }
+
+  get currentEvent() {
+    return this.eventOn(this.day);
+  }
+
+  customerDemand(day) {
+    const multiplier = this.eventOn(day)?.multiplier ?? 1;
     const offset = (this.rng() * 2 - 1) * this.demandSpread;
-    return Math.max(0, Math.round(this.demandMean + offset));
+    return Math.max(0, Math.round(this.demandMean * multiplier + offset));
   }
 
   step(playerOrders = {}) {
     const day = ++this.day;
-    const demand = this.customerDemand();
+    const demand = this.customerDemand(day);
 
     for (const s of this.stages) s.receiveShipments(day);
 
     this.stages[0].incomingOrder = demand;
     for (const s of this.stages) {
       s.fulfil(day);
+      s.observeDemand(s.incomingOrder);
       if (s.upstream) s.placeOrder(playerOrders[s.id] ?? s.autoOrderQty());
     }
 
@@ -51,15 +63,14 @@ export class Simulation {
 
     let dayCost = 0;
     for (const s of this.stages) dayCost += s.addDailyCost();
-    const revenue = sold * this.salePrice;
-    const purchases = supplier.lastShipped * this.rawCost;
-    this.cash += revenue - purchases - dayCost;
+    this.cash += sold * this.salePrice - supplier.lastShipped * this.rawCost - dayCost;
 
     this.lastDemand = demand;
     this.totalDemand += demand;
     this.totalSold += sold;
 
-    const snapshot = { day, demand, sold, cash: this.cash };
+    const snapshot = { day, demand, sold, cash: this.cash,
+                       event: this.eventOn(day)?.name ?? null };
     for (const s of this.stages) {
       snapshot[s.id] = { stock: s.stock, backlog: s.backlog,
                          ordered: s.lastOrder, shipped: s.lastShipped };

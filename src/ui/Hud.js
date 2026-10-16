@@ -10,6 +10,7 @@ export class Hud {
         <span>Cash <strong data-cash></strong></span>
         <span>Service level <strong data-service></strong></span>
         <span class="muted">Seed <span data-seed></span></span>
+        <span class="event" data-event></span>
       </div>
       <div class="hud-controls">
         <button data-play>Play</button>
@@ -24,6 +25,7 @@ export class Hud {
     this.cashEl = root.querySelector('[data-cash]');
     this.serviceEl = root.querySelector('[data-service]');
     this.seedEl = root.querySelector('[data-seed]');
+    this.eventEl = root.querySelector('[data-event]');
     this.playBtn = root.querySelector('[data-play]');
 
     this.playBtn.addEventListener('click', onPlayPause);
@@ -49,5 +51,10 @@ export class Hud {
     this.cashEl.classList.toggle('negative', sim.cash < 0);
     this.serviceEl.textContent = `${Math.round(sim.serviceLevel * 100)}%`;
     this.seedEl.textContent = sim.seed;
+
+    const ev = sim.currentEvent;
+    this.eventEl.textContent = ev
+      ? `${ev.name}: demand ×${ev.multiplier} until day ${ev.endDay}`
+      : '';
   }
 }

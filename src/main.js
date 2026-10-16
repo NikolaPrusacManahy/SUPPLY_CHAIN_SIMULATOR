@@ -1,12 +1,12 @@
 import './style.css';
-import { Stage } from './sim/Stage.js';
-import { Simulation } from './sim/Simulation.js';
+import { Stage } from './sim/stage.js';
+import { Simulation } from './sim/simulation.js';
 import { bullwhipRatio } from './sim/stats.js';
-import { GameLoop } from './game/GameLoop.js';
-import { Hud } from './ui/Hud.js';
-import { StagePanels } from './ui/StagePanels.js';
-import { Charts } from './ui/Charts.js';
-import { World3D } from './render/World3D.js';
+import { GameLoop } from './game/game-loop.js';
+import { Hud } from './ui/hud.js';
+import { StagePanels } from './ui/stage-panels.js';
+import { Charts } from './ui/charts.js';
+import { World3D } from './render/world3d.js';
 
 const euro = new Intl.NumberFormat('en-IE', {
   style: 'currency', currency: 'EUR', maximumFractionDigits: 0,

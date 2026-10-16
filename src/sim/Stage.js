@@ -48,6 +48,7 @@ export class Stage {
     if (this.downstream && shipped > 0) {
       this.downstream.inTransit.push({
         qty: shipped,
+        departedOn: day,
         arrivesOn: day + this.downstream.leadTime,
       });
     }

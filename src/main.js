@@ -6,16 +6,17 @@ import { GameLoop } from './game/GameLoop.js';
 import { Hud } from './ui/Hud.js';
 import { StagePanels } from './ui/StagePanels.js';
 import { Charts } from './ui/Charts.js';
+import { World3D } from './render/World3D.js';
 
 const euro = new Intl.NumberFormat('en-IE', {
   style: 'currency', currency: 'EUR', maximumFractionDigits: 0,
 });
 
 function createSimulation() {
-  const stages = [
-    new Stage({ id: 'retailer',  name: 'Retailer',  stock: 60, leadTime: 2, targetStock: 60, lostSales: true }),
-    new Stage({ id: 'warehouse', name: 'Warehouse', stock: 60, leadTime: 2, targetStock: 60 }),
-    new Stage({ id: 'factory',   name: 'Factory',   stock: 80, leadTime: 3, targetStock: 80 }),
+    const stages = [
+    new Stage({ id: 'retailer',  name: 'Retailer',  leadTime: 2, lostSales: true }),
+    new Stage({ id: 'warehouse', name: 'Warehouse', leadTime: 2 }),
+    new Stage({ id: 'factory',   name: 'Factory',   leadTime: 3 }),
     new Stage({ id: 'supplier',  name: 'Supplier',  infinite: true }),
   ];
   const seed = Math.floor(Math.random() * 1_000_000);
@@ -30,8 +31,12 @@ let panels = new StagePanels(chainEl, sim.stages);
 
 const stageNames = Object.fromEntries(sim.stages.map((s) => [s.id, s.name]));
 const charts = new Charts(document.querySelector('#charts'), stageNames);
+const world = new World3D(document.querySelector('#world'));
 
-const loop = new GameLoop({ onTick: tick });
+const loop = new GameLoop({
+  onTick: tick,
+  onFrame: (progress) => world.render(sim, progress),
+});
 
 const hud = new Hud(document.querySelector('#hud'), {
   onPlayPause: () => {
@@ -79,6 +84,7 @@ function showSummary() {
 
 function restart() {
   loop.pause();
+  loop.reset();
   hud.setPlaying(false);
   sim = createSimulation();
   panels = new StagePanels(chainEl, sim.stages);

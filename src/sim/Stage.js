@@ -1,12 +1,13 @@
 export class Stage {
   constructor({ id, name, stock = 0, leadTime = 2, targetStock = 60,
-                holdingCost = 0.5, backlogCost = 2, infinite = false }) {
+                holdingCost = 0.5, backlogCost = 2, infinite = false, lostSales = false }) {
     Object.assign(this, { id, name, stock, leadTime, targetStock,
-                          holdingCost, backlogCost, infinite });
-    this.backlog = 0;        // units we owe downstream but couldn't ship yet
-    this.onOrder = 0;        // units we ordered upstream that haven't arrived
+                          holdingCost, backlogCost, infinite, lostSales });
+    this.backlog = 0;        // units owed downstream (not used if lostSales)
+    this.lastLost = 0;       // customers turned away today (retailer only)
+    this.onOrder = 0;        // ordered upstream, not yet arrived
     this.inTransit = [];     // shipments heading to us: { qty, arrivesOn }
-    this.incomingOrder = 0;  // what downstream asked us for today
+    this.incomingOrder = 0;
     this.lastOrder = 0;
     this.lastShipped = 0;
     this.totalCost = 0;
@@ -14,9 +15,12 @@ export class Stage {
     this.downstream = null;
   }
 
-  // Stock + what's coming - what we owe. Used for ordering decisions.
   get inventoryPosition() {
     return this.stock + this.onOrder - this.backlog;
+  }
+
+  get inTransitTotal() {
+    return this.inTransit.reduce((sum, s) => sum + s.qty, 0);
   }
 
   receiveShipments(day) {
@@ -28,13 +32,19 @@ export class Stage {
     }
   }
 
-  // Ship as much as we can of today's order plus anything still owed
   fulfil(day) {
     const owed = this.incomingOrder + this.backlog;
     const shipped = this.infinite ? owed : Math.min(this.stock, owed);
     if (!this.infinite) this.stock -= shipped;
-    this.backlog = owed - shipped;
+
+    if (this.lostSales) {
+      this.lastLost = owed - shipped; // customers don't wait
+      this.backlog = 0;
+    } else {
+      this.backlog = owed - shipped;
+    }
     this.lastShipped = shipped;
+
     if (this.downstream && shipped > 0) {
       this.downstream.inTransit.push({
         qty: shipped,
@@ -43,7 +53,6 @@ export class Stage {
     }
   }
 
-  // Automatic rule: order enough to bring inventory position back to target
   autoOrderQty() {
     return Math.max(0, this.targetStock - this.inventoryPosition);
   }
@@ -54,8 +63,12 @@ export class Stage {
     if (this.upstream) this.upstream.incomingOrder = qty;
   }
 
+  // Returns today's cost so the simulation can subtract it from cash
   addDailyCost() {
-    if (this.infinite) return;
-    this.totalCost += this.stock * this.holdingCost + this.backlog * this.backlogCost;
+    if (this.infinite) return 0;
+    const shortage = this.lostSales ? this.lastLost : this.backlog;
+    const cost = this.stock * this.holdingCost + shortage * this.backlogCost;
+    this.totalCost += cost;
+    return cost;
   }
 }

@@ -13,7 +13,7 @@ const euro = new Intl.NumberFormat('en-IE', {
 
 function createSimulation() {
   const stages = [
-    new Stage({ id: 'retailer',  name: 'Retailer',  stock: 40, leadTime: 2, targetStock: 60, lostSales: true }),
+    new Stage({ id: 'retailer',  name: 'Retailer',  stock: 60, leadTime: 2, targetStock: 60, lostSales: true }),
     new Stage({ id: 'warehouse', name: 'Warehouse', stock: 60, leadTime: 2, targetStock: 60 }),
     new Stage({ id: 'factory',   name: 'Factory',   stock: 80, leadTime: 3, targetStock: 80 }),
     new Stage({ id: 'supplier',  name: 'Supplier',  infinite: true }),

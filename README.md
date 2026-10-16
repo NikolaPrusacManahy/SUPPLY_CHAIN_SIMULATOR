@@ -1,4 +1,4 @@
-# Supply Chain Tycoon (working title)
+# Supply Chain Simulator
 
 A 3D logistics tycoon game built for the Game Development module.
 This README doubles as the **Game Design Document (GDD)**. Sections marked ✅ are implemented, 🔜 are planned.

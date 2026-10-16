@@ -15,7 +15,7 @@ button:hover { background: #f0f0f0; }
 button.active { background: #222; color: #fff; border-color: #222; }
 
 #chain { display: flex; align-items: stretch; gap: 8px; overflow-x: auto; }
-.card { flex: 1; min-width: 170px; background: #fff; border: 1px solid #ddd; border-radius: 8px;
+.card { flex: 1; min-width: 0; background: #fff; border: 1px solid #ddd; border-radius: 8px;
         padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .card.warning { border-color: #e24b4a; }
 .card h2 { font-size: 16px; }
@@ -25,8 +25,8 @@ button.active { background: #222; color: #fff; border-color: #222; }
 .card label { font-size: 14px; display: flex; align-items: center; gap: 6px; }
 .card input[type='number'] { width: 70px; padding: 4px; font: inherit; }
 
-.arrow { display: flex; flex-direction: column; justify-content: center; align-items: center;
-         min-width: 70px; font-size: 12px; color: #666; text-align: center; }
+.arrow { flex: 0 0 64px; display: flex; flex-direction: column; justify-content: center;
+         align-items: center; font-size: 12px; color: #666; text-align: center; }
 .arrow-line { font-size: 22px; }
 
 #message { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; }

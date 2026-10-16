@@ -1,9 +1,11 @@
 import './style.css';
 import { Stage } from './sim/Stage.js';
 import { Simulation } from './sim/Simulation.js';
+import { bullwhipRatio } from './sim/stats.js';
 import { GameLoop } from './game/GameLoop.js';
 import { Hud } from './ui/Hud.js';
 import { StagePanels } from './ui/StagePanels.js';
+import { Charts } from './ui/Charts.js';
 
 const euro = new Intl.NumberFormat('en-IE', {
   style: 'currency', currency: 'EUR', maximumFractionDigits: 0,
@@ -25,6 +27,9 @@ const messageEl = document.querySelector('#message');
 
 let sim = createSimulation();
 let panels = new StagePanels(chainEl, sim.stages);
+
+const stageNames = Object.fromEntries(sim.stages.map((s) => [s.id, s.name]));
+const charts = new Charts(document.querySelector('#charts'), stageNames);
 
 const loop = new GameLoop({ onTick: tick });
 
@@ -52,15 +57,23 @@ function tick() {
 function render() {
   hud.update(sim);
   panels.update(sim);
+  charts.update(sim.history);
 }
 
 function showSummary() {
   const totalCost = sim.stages.reduce((sum, s) => sum + s.totalCost, 0);
+  const ratios = sim.stages
+    .filter((s) => !s.infinite)
+    .map((s) => `<li>${s.name}: <strong>${bullwhipRatio(sim.history, s.id).toFixed(2)}</strong></li>`)
+    .join('');
+
   messageEl.innerHTML = `
     <h2>Game over after ${sim.maxDays} days</h2>
     <p>Final cash: <strong>${euro.format(sim.cash)}</strong></p>
     <p>Service level: <strong>${Math.round(sim.serviceLevel * 100)}%</strong></p>
     <p>Total holding and shortage costs: <strong>${euro.format(totalCost)}</strong></p>
+    <p>Bullwhip ratio (order variance ÷ demand variance, 1.00 = no amplification):</p>
+    <ul>${ratios}</ul>
     <p class="muted">Press Restart to play again.</p>`;
 }
 

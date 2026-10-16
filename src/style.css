@@ -31,3 +31,7 @@ button.active { background: #222; color: #fff; border-color: #222; }
 
 #message { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; }
 #message:empty { display: none; }
+
+#charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 16px; }
+.chart-box { position: relative; height: 300px; background: #fff; border: 1px solid #ddd;
+             border-radius: 8px; padding: 12px; }

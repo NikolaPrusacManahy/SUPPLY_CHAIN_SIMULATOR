@@ -1,5 +1,6 @@
+// One in-game day lasts msPerDay at x1 speed (10 seconds)
 export class GameLoop {
-  constructor({ onTick, onFrame, msPerDay = 1000 }) {
+  constructor({ onTick, onFrame, msPerDay = 10000 }) {
     this.onTick = onTick;
     this.onFrame = onFrame;
     this.msPerDay = msPerDay;

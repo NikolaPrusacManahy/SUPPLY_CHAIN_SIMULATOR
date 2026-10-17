@@ -17,6 +17,7 @@ export class Hud {
         <button data-speed="1" class="active">1x</button>
         <button data-speed="2">2x</button>
         <button data-speed="4">4x</button>
+        <button data-speed="10">10x</button>
         <button data-restart>Restart</button>
       </div>`;
 

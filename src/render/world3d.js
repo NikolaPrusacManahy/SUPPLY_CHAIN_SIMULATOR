@@ -1,14 +1,29 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { loadModels, fitModel } from './models.js';
 
-// Placeholder layout. Keys must match stage ids. Order = road order.
+// Keys must match stage ids. Order = road order.
+// size/color are only used for the placeholder box shown until the models load.
+// footprint = how wide the model is drawn; rot = turn (radians) to face the road.
 const LAYOUT = {
-  supplier:  { pos: [-18, 0, -6], size: [5, 3, 5], color: 0x888780 },
-  factory:   { pos: [-6, 0, 4],   size: [6, 5, 5], color: 0x7f77dd },
-  warehouse: { pos: [6, 0, -4],   size: [7, 4, 5], color: 0x1d9e75 },
-  retailer:  { pos: [18, 0, 5],   size: [4, 3, 4], color: 0xd85a30 },
+  supplier:  { pos: [-18, 0, -6], size: [5, 3, 5], color: 0x888780, footprint: 7, rot: 0 },
+  factory:   { pos: [-6, 0, 4],   size: [6, 5, 5], color: 0x7f77dd, footprint: 8, rot: 0 },
+  warehouse: { pos: [6, 0, -4],   size: [7, 4, 5], color: 0x1d9e75, footprint: 8, rot: 0 },
+  retailer:  { pos: [18, 0, 5],   size: [4, 3, 4], color: 0xd85a30, footprint: 6, rot: 0 },
 };
+
+// Decoration only: no game logic. [model key, x, z, footprint, rotation]
+const PROPS = [
+  ['containerA', -24, -9, 2.5, 0.3],
+  ['tank', -23, -1, 2.5, 0],
+  ['waterTower', -14, 10, 2.4, 0],
+  ['containerA', 11, -9, 2.5, Math.PI / 2],
+  ['containerB', 13, -6.5, 2.5, Math.PI / 2],
+];
+
+const TRUCK_LENGTH = 2.4;
+const ROAD_Y = 0.1;
 
 export class World3D {
   constructor(container) {
@@ -17,7 +32,7 @@ export class World3D {
     this.scene.background = new THREE.Color(0xbfd9ea);
 
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.1, 500);
-    this.camera.position.set(0, 30, 38);
+    this.camera.position.set(0, 24, 30);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -35,21 +50,23 @@ export class World3D {
     this.controls.minDistance = 15;
     this.controls.maxDistance = 90;
 
-    this.buildings = new Map();
-    this.labels = new Map();
+    this.buildings = new Map(); // stage id -> { group, placeholder, label, labelDiv, ring }
     this.addLights();
     this.addGround();
     for (const [id, cfg] of Object.entries(LAYOUT)) this.addBuilding(id, cfg);
     this.addRoads();
 
-    // Trucks share one geometry and material; only the meshes are separate
-    this.truckGeometry = new THREE.BoxGeometry(0.9, 1, 1.6);
-    this.truckMaterial = new THREE.MeshStandardMaterial({ color: 0xef9f27 });
-    this.trucks = new Map(); // shipment object -> truck mesh
+    // Until the truck model loads, trucks are simple boxes
+    this.truckTemplate = null;
+    this.boxTruckGeometry = new THREE.BoxGeometry(0.9, 1, 1.6).translate(0, 0.5, 0);
+    this.boxTruckMaterial = new THREE.MeshStandardMaterial({ color: 0xef9f27 });
+    this.trucks = new Map(); // shipment object -> truck object
     this.currentSim = null;
 
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
+
+    this.loadAssets();
   }
 
   addLights() {
@@ -74,28 +91,42 @@ export class World3D {
 
   addBuilding(id, { pos, size, color }) {
     const [w, h, d] = size;
-    const mesh = new THREE.Mesh(
+    const group = new THREE.Group();
+    group.position.set(pos[0], 0, pos[2]);
+    group.userData.stageId = id;
+    this.scene.add(group);
+
+    const placeholder = new THREE.Mesh(
       new THREE.BoxGeometry(w, h, d),
       new THREE.MeshStandardMaterial({ color }),
     );
-    mesh.position.set(pos[0], h / 2, pos[2]);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.userData.stageId = id;
-    this.scene.add(mesh);
-    this.buildings.set(id, mesh);
+    placeholder.position.y = h / 2;
+    placeholder.castShadow = true;
+    placeholder.receiveShadow = true;
+    group.add(placeholder);
 
-    const div = document.createElement('div');
-    div.className = 'world-label';
-    const label = new CSS2DObject(div);
-    label.position.set(0, h / 2 + 1.2, 0);
-    mesh.add(label);
-    this.labels.set(id, div);
+    // Red ring on the ground that shows when the building runs out of stock
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(Math.max(w, d) * 0.75, Math.max(w, d) * 0.9, 48),
+      new THREE.MeshBasicMaterial({ color: 0xe24b4a, transparent: true, opacity: 0.8 }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.15;
+    ring.visible = false;
+    group.add(ring);
+
+    const labelDiv = document.createElement('div');
+    labelDiv.className = 'world-label';
+    const label = new CSS2DObject(labelDiv);
+    label.position.set(0, h + 1.2, 0);
+    group.add(label);
+
+    this.buildings.set(id, { group, placeholder, label, labelDiv, ring });
   }
 
   roadPoint(id) {
     const p = LAYOUT[id].pos;
-    return new THREE.Vector3(p[0], 0.05, p[2]);
+    return new THREE.Vector3(p[0], ROAD_Y, p[2]);
   }
 
   addRoads() {
@@ -104,15 +135,71 @@ export class World3D {
     for (let i = 0; i < ids.length - 1; i++) {
       const a = this.roadPoint(ids[i]);
       const b = this.roadPoint(ids[i + 1]);
-      const road = new THREE.Mesh(
-        new THREE.BoxGeometry(a.distanceTo(b), 0.1, 2.2),
-        material,
-      );
+      const road = new THREE.Mesh(new THREE.BoxGeometry(a.distanceTo(b), 0.1, 2.2), material);
       road.position.copy(a).lerp(b, 0.5);
+      road.position.y = 0.05;
       road.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
       road.receiveShadow = true;
       this.scene.add(road);
     }
+  }
+
+  // Swap placeholders for the Kenney models. If loading fails the game keeps
+  // working with the boxes, so a missing file never breaks gameplay.
+  async loadAssets() {
+    let models;
+    try {
+      models = await loadModels();
+    } catch (err) {
+      console.warn('3D models failed to load, using placeholder boxes.', err);
+      return;
+    }
+
+    for (const [id, cfg] of Object.entries(LAYOUT)) {
+      const b = this.buildings.get(id);
+      const model = models[id];
+      model.rotation.y = cfg.rot;
+      const height = fitModel(model, cfg.footprint);
+      b.group.remove(b.placeholder);
+      b.group.add(model);
+      b.label.position.y = height + 1.2;
+      b.ring.geometry.dispose();
+      b.ring.geometry = new THREE.RingGeometry(cfg.footprint * 0.58, cfg.footprint * 0.66, 48);
+    }
+
+    for (const [key, x, z, size, rot] of PROPS) {
+      const prop = models[key].clone();
+      prop.rotation.y = rot;
+      fitModel(prop, size);
+      const holder = new THREE.Group();
+      holder.position.set(x, 0, z);
+      holder.add(prop);
+      this.scene.add(holder);
+    }
+
+    // Kenney cars face +Z, which is the direction lookAt() points, so no extra turn needed
+    const truck = models.truck;
+    const box = new THREE.Box3().setFromObject(truck);
+    const length = box.getSize(new THREE.Vector3()).z;
+    truck.scale.multiplyScalar(TRUCK_LENGTH / length);
+    box.setFromObject(truck);
+    truck.position.y -= box.min.y;
+    this.truckTemplate = truck;
+
+    this.clearTrucks(); // existing box trucks get rebuilt with the model next frame
+  }
+
+  createTruck() {
+    const holder = new THREE.Group();
+    if (this.truckTemplate) {
+      holder.add(this.truckTemplate.clone()); // clone shares geometry + materials
+    } else {
+      const box = new THREE.Mesh(this.boxTruckGeometry, this.boxTruckMaterial);
+      box.castShadow = true;
+      holder.add(box);
+    }
+    this.scene.add(holder);
+    return holder;
   }
 
   // One truck per shipment in the simulation; created when a shipment appears,
@@ -134,16 +221,13 @@ export class World3D {
         alive.add(shipment);
         let truck = this.trucks.get(shipment);
         if (!truck) {
-          truck = new THREE.Mesh(this.truckGeometry, this.truckMaterial);
-          truck.castShadow = true;
-          this.scene.add(truck);
+          truck = this.createTruck();
           this.trucks.set(shipment, truck);
         }
         const duration = shipment.arrivesOn - shipment.departedOn;
         const t = THREE.MathUtils.clamp((now - shipment.departedOn) / duration, 0, 1);
         truck.position.lerpVectors(from, to, t);
-        truck.position.y = 0.6;
-        truck.lookAt(to.x, 0.6, to.z);
+        truck.lookAt(to.x, ROAD_Y, to.z);
       }
     }
 
@@ -162,16 +246,16 @@ export class World3D {
 
   updateLabels(sim) {
     for (const stage of sim.stages) {
-      const div = this.labels.get(stage.id);
-      if (!div) continue;
+      const b = this.buildings.get(stage.id);
+      if (!b) continue;
       if (stage.infinite) {
-        div.textContent = stage.name;
+        b.labelDiv.textContent = stage.name;
         continue;
       }
       const shortage = stage.lostSales ? stage.lastLost : stage.backlog;
-      div.textContent = `${stage.name} · ${Math.round(stage.stock)}`;
-      div.classList.toggle('alert', shortage > 0);
-      this.buildings.get(stage.id).material.emissive.setHex(shortage > 0 ? 0x661111 : 0x000000);
+      b.labelDiv.textContent = `${stage.name} · ${Math.round(stage.stock)}`;
+      b.labelDiv.classList.toggle('alert', shortage > 0);
+      b.ring.visible = shortage > 0;
     }
   }
 

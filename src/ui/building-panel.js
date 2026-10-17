@@ -1,0 +1,202 @@
+import { TRUCK_TYPES, travelDays } from '../sim/trucks.js';
+
+const fmt = (n) => Math.round(n).toLocaleString('en-IE');
+const euro = (n) => `€${fmt(n)}`;
+const units = (n) => `${fmt(n)} ${n === 1 ? 'unit' : 'units'}`;
+
+const POLICIES = {
+  forecast: 'Orders what recent demand suggests. Reacts fast, but can overreact and cause the bullwhip effect.',
+  basestock: 'Tops stock up to a fixed level every day. Steady, but sends many part-full trucks.',
+  fulltruck: 'Waits until stock is low, then orders whole truckloads only. Cheapest transport, more stock to store.',
+  manual: 'You decide how much is ordered every day.',
+};
+
+const UPGRADES = [
+  ['Bigger storage', 'Hold more stock at this building.'],
+  ['Loading dock', 'Load and unload trucks faster.'],
+  ['Own truck fleet', 'Buy trucks instead of paying per trip.'],
+];
+
+// Side panel for the selected building: Overview, Manage and Upgrade tabs.
+// The structure is built once per selection; update() only changes text, so inputs keep focus.
+export class BuildingPanel {
+  constructor(root, { onClose }) {
+    this.root = root;
+    this.onClose = onClose;
+    this.stage = null;
+    this.tab = 'overview';
+  }
+
+  show(stage, sim) {
+    this.stage = stage;
+    this.root.hidden = false;
+    const hasManage = !stage.infinite;
+    if (!hasManage) this.tab = 'overview';
+
+    this.root.innerHTML = `
+      <header class="panel-head">
+        <div>
+          <h2>${stage.name}</h2>
+          <p class="muted">${this.subtitle(stage)}</p>
+        </div>
+        <button class="icon" data-close aria-label="Close">&times;</button>
+      </header>
+      <nav class="tabs">
+        <button data-tab="overview">Overview</button>
+        ${hasManage ? '<button data-tab="manage">Manage</button>' : ''}
+        <button data-tab="upgrade">Upgrade</button>
+      </nav>
+      <section data-page="overview">${this.overviewHtml(stage)}</section>
+      ${hasManage ? `<section data-page="manage">${this.manageHtml(stage)}</section>` : ''}
+      <section data-page="upgrade">${this.upgradeHtml()}</section>`;
+
+    this.root.querySelector('[data-close]').addEventListener('click', () => this.onClose());
+    for (const btn of this.root.querySelectorAll('[data-tab]')) {
+      btn.addEventListener('click', () => this.setTab(btn.dataset.tab));
+    }
+    if (hasManage) this.bindManage(stage);
+    this.setTab(this.tab);
+    this.update(sim);
+  }
+
+  hide() {
+    this.stage = null;
+    this.root.hidden = true;
+    this.root.innerHTML = '';
+  }
+
+  subtitle(stage) {
+    switch (stage.type) {
+      case 'supplier': return 'Sells raw material to the factory';
+      case 'factory': return `Turns raw material into products in ${stage.processingDays} day`;
+      case 'warehouse': return 'Supplies all three shops';
+      default: return `Sells to local customers (about ${stage.demandMean} a day)`;
+    }
+  }
+
+  setTab(tab) {
+    this.tab = tab;
+    for (const btn of this.root.querySelectorAll('[data-tab]')) btn.classList.toggle('active', btn.dataset.tab === tab);
+    for (const page of this.root.querySelectorAll('[data-page]')) page.hidden = page.dataset.page !== tab;
+  }
+
+  overviewHtml(stage) {
+    if (stage.infinite) {
+      return `<dl>
+        <dt>Stock</dt><dd>Unlimited</dd>
+        <dt>Shipped today</dt><dd data-f="shipped"></dd>
+      </dl>
+      <p class="muted">Raw material is paid for when it leaves the supplier.</p>`;
+    }
+    const shopRows = stage.type === 'shop'
+      ? '<dt>Customers today</dt><dd data-f="demand"></dd><dt>Sold today</dt><dd data-f="sold"></dd><dt>Lost sales today</dt><dd data-f="lost"></dd>'
+      : '<dt>Orders received today</dt><dd data-f="demand"></dd><dt>Shipped today</dt><dd data-f="shipped"></dd><dt>Still owed (backlog)</dt><dd data-f="backlog"></dd>';
+    return `
+      <div class="big-stat"><span class="muted">Stock</span><strong data-f="stock"></strong></div>
+      <svg class="spark" data-f="spark" viewBox="0 0 200 40" preserveAspectRatio="none"><polyline /></svg>
+      <dl>
+        ${shopRows}
+        <dt>Forecast per day</dt><dd data-f="forecast"></dd>
+        <dt>On order</dt><dd data-f="onorder"></dd>
+        <dt>Delivery time</dt><dd data-f="lead"></dd>
+        <dt>Storage and shortage costs</dt><dd data-f="cost"></dd>
+        <dt>Transport costs</dt><dd data-f="transport"></dd>
+      </dl>
+      <h3>Incoming</h3>
+      <ul class="incoming" data-f="incoming"></ul>`;
+  }
+
+  manageHtml(stage) {
+    const options = Object.entries({
+      forecast: 'Auto: forecast', basestock: 'Auto: fixed target', fulltruck: 'Auto: full trucks', manual: 'Manual',
+    }).map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
+    const trucks = Object.values(TRUCK_TYPES).map((t) => `
+      <button class="truck-option" data-truck="${t.id}">
+        <strong>${t.name}</strong>
+        <span>${t.capacity} units · ${travelDays(stage.distance, t.id)} day trip · €${t.tripCost} per trip</span>
+        <span class="muted">€${(t.tripCost / t.capacity).toFixed(2)} per unit when full</span>
+      </button>`).join('');
+    return `
+      <h3>Ordering</h3>
+      <select data-policy>${options}</select>
+      <p class="muted" data-policy-help></p>
+      <label class="row">Daily order <input type="number" min="0" step="1" data-qty /></label>
+      <h3>Delivered by</h3>
+      <p class="muted">From ${stage.upstream.name}, ${Math.round(stage.distance)} km. Applies to the next delivery.</p>
+      <div class="truck-options">${trucks}</div>`;
+  }
+
+  upgradeHtml() {
+    return UPGRADES.map(([name, text]) => `
+      <div class="upgrade locked">
+        <div><strong>${name}</strong><p class="muted">${text}</p></div>
+        <span class="badge">Coming soon</span>
+      </div>`).join('');
+  }
+
+  bindManage(stage) {
+    const policy = this.root.querySelector('[data-policy]');
+    const help = this.root.querySelector('[data-policy-help]');
+    const qty = this.root.querySelector('[data-qty]');
+    const syncPolicy = () => {
+      help.textContent = POLICIES[stage.policy];
+      qty.disabled = stage.policy !== 'manual';
+    };
+    policy.value = stage.policy;
+    qty.value = stage.manualQty;
+    syncPolicy();
+    policy.addEventListener('change', () => { stage.policy = policy.value; syncPolicy(); });
+    qty.addEventListener('input', () => { stage.manualQty = Math.max(0, Math.floor(Number(qty.value)) || 0); });
+
+    const truckButtons = this.root.querySelectorAll('[data-truck]');
+    const syncTruck = () => truckButtons.forEach((b) => b.classList.toggle('active', b.dataset.truck === stage.truck));
+    truckButtons.forEach((b) => b.addEventListener('click', () => { stage.truck = b.dataset.truck; syncTruck(); }));
+    syncTruck();
+  }
+
+  update(sim) {
+    const stage = this.stage;
+    if (!stage) return;
+    const set = (key, text) => {
+      const el = this.root.querySelector(`[data-f="${key}"]`);
+      if (el) el.textContent = text;
+    };
+    set('shipped', fmt(stage.lastShipped));
+    if (stage.infinite) return;
+
+    set('stock', fmt(stage.stock));
+    set('demand', fmt(stage.lastDemand));
+    set('sold', fmt(stage.lastSold));
+    set('lost', fmt(stage.lastLost));
+    set('backlog', fmt(stage.backlog));
+    set('forecast', stage.forecast.toFixed(1));
+    set('onorder', fmt(stage.onOrder));
+    set('lead', `${stage.leadTime} days`);
+    set('cost', euro(stage.totalCost));
+    set('transport', euro(stage.transportCost));
+
+    const lost = this.root.querySelector('[data-f="lost"]');
+    if (lost) lost.classList.toggle('negative', stage.lastLost > 0);
+
+    // Trucks on the way, grouped by arrival day and truck type
+    const groups = new Map();
+    for (const s of stage.inTransit) {
+      const key = `${s.arrivesOn}|${s.truck}`;
+      const g = groups.get(key) ?? { day: s.arrivesOn, truck: s.truck, qty: 0, count: 0 };
+      g.qty += s.qty;
+      g.count += 1;
+      groups.set(key, g);
+    }
+    const list = [...groups.values()].sort((a, b) => a.day - b.day).map((g) =>
+      `<li>${g.count} × ${TRUCK_TYPES[g.truck].name} · ${units(g.qty)} · day ${g.day}</li>`);
+    for (const p of stage.processing) list.push(`<li>In production · ${units(p.qty)} · ready day ${p.readyOn}</li>`);
+    this.root.querySelector('[data-f="incoming"]').innerHTML = list.join('') || '<li class="muted">Nothing on the way</li>';
+
+    // Stock over the last 30 days
+    const points = sim.history.slice(-30).map((h) => h[stage.id].stock);
+    const max = Math.max(1, ...points);
+    const step = points.length > 1 ? 200 / (points.length - 1) : 0;
+    this.root.querySelector('[data-f="spark"] polyline').setAttribute('points',
+      points.map((v, i) => `${(i * step).toFixed(1)},${(38 - (v / max) * 36).toFixed(1)}`).join(' '));
+  }
+}

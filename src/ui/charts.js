@@ -1,82 +1,86 @@
 import Chart from 'chart.js/auto';
 
-const STAGE_IDS = ['retailer', 'warehouse', 'factory'];
-const COLORS = {
-  demand: '#222222',
-  retailer: '#d85a30',
-  warehouse: '#7f77dd',
-  factory: '#1d9e75',
-};
+const COLORS = { demand: '#222222', shops: '#d85a30', warehouse: '#7f77dd', factory: '#1d9e75', cash: '#378add' };
 
-function lineDataset(label, color, dashed = false) {
-  return {
-    label,
-    data: [],
-    borderColor: color,
-    backgroundColor: color,
-    borderWidth: 2,
-    borderDash: dashed ? [6, 4] : [],
-    pointRadius: 0,
-    tension: 0.2,
-  };
-}
+const sumShops = (h, key, sim) => sim.shops.reduce((sum, s) => sum + h[s.id][key], 0);
 
-function createChart(canvas, title, datasets) {
-  return new Chart(canvas, {
-    type: 'line',
-    data: { labels: [], datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: { title: { display: true, text: title } },
-      scales: {
-        x: { title: { display: true, text: 'Day' } },
-        y: { beginAtZero: true, title: { display: true, text: 'Units' } },
-      },
-    },
-  });
-}
+// Each chart is a list of series: [label, colour, value(snapshot), dashed]
+const CHARTS = [
+  {
+    title: 'Orders vs customer demand (bullwhip effect)',
+    unit: 'Units',
+    series: [
+      ['Customer demand', COLORS.demand, (h) => h.demand, true],
+      ['Shop orders (all)', COLORS.shops, (h, sim) => sumShops(h, 'ordered', sim)],
+      ['Warehouse orders', COLORS.warehouse, (h) => h.warehouse.ordered],
+      ['Factory orders', COLORS.factory, (h) => h.factory.ordered],
+    ],
+  },
+  {
+    title: 'Stock levels',
+    unit: 'Units',
+    series: [
+      ['Shops (all)', COLORS.shops, (h, sim) => sumShops(h, 'stock', sim)],
+      ['Warehouse', COLORS.warehouse, (h) => h.warehouse.stock],
+      ['Factory', COLORS.factory, (h) => h.factory.stock],
+    ],
+  },
+  {
+    title: 'Cash',
+    unit: '€',
+    series: [['Cash', COLORS.cash, (h) => h.cash]],
+  },
+];
 
 export class Charts {
-  constructor(root, stageNames) {
-    root.innerHTML = `
-      <div class="chart-box"><canvas data-orders></canvas></div>
-      <div class="chart-box"><canvas data-stock></canvas></div>`;
+  constructor(root) {
+    this.root = root;
+    root.innerHTML = CHARTS.map(() => '<div class="chart-box"><canvas></canvas></div>').join('');
+    const canvases = root.querySelectorAll('canvas');
+    this.charts = CHARTS.map((cfg, i) => new Chart(canvases[i], {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: cfg.series.map(([label, color, , dashed]) => ({
+          label, data: [], borderColor: color, backgroundColor: color, borderWidth: 2,
+          borderDash: dashed ? [6, 4] : [], pointRadius: 0, tension: 0.2,
+        })),
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { title: { display: true, text: cfg.title } },
+        scales: {
+          x: { title: { display: true, text: 'Day' } },
+          y: { beginAtZero: cfg.unit !== '€', title: { display: true, text: cfg.unit } },
+        },
+      },
+    }));
+  }
 
-    this.ordersChart = createChart(
-      root.querySelector('[data-orders]'),
-      'Orders vs customer demand (bullwhip effect)',
-      [
-        lineDataset('Customer demand', COLORS.demand, true),
-        ...STAGE_IDS.map((id) => lineDataset(`${stageNames[id]} orders`, COLORS[id])),
-      ],
-    );
+  get visible() {
+    return !this.root.hidden;
+  }
 
-    this.stockChart = createChart(
-      root.querySelector('[data-stock]'),
-      'Stock levels',
-      STAGE_IDS.map((id) => lineDataset(`${stageNames[id]} stock`, COLORS[id])),
-    );
+  toggle() {
+    this.root.hidden = !this.root.hidden;
+    if (this.visible) this.charts.forEach((c) => c.resize());
+    return this.visible;
   }
 
   // Redraw from the simulation history, so a restart (empty history) clears the charts
-  update(history) {
-    const labels = history.map((h) => h.day);
-
-    this.ordersChart.data.labels = labels;
-    this.ordersChart.data.datasets[0].data = history.map((h) => h.demand);
-    STAGE_IDS.forEach((id, i) => {
-      this.ordersChart.data.datasets[i + 1].data = history.map((h) => h[id].ordered);
+  update(sim) {
+    if (!this.visible) return;
+    const labels = sim.history.map((h) => h.day);
+    CHARTS.forEach((cfg, i) => {
+      const chart = this.charts[i];
+      chart.data.labels = labels;
+      cfg.series.forEach(([, , value], j) => {
+        chart.data.datasets[j].data = sim.history.map((h) => value(h, sim));
+      });
+      chart.update('none');
     });
-
-    this.stockChart.data.labels = labels;
-    STAGE_IDS.forEach((id, i) => {
-      this.stockChart.data.datasets[i].data = history.map((h) => h[id].stock);
-    });
-
-    this.ordersChart.update('none');
-    this.stockChart.update('none');
   }
 }

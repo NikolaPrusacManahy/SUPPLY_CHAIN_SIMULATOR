@@ -1,10 +1,9 @@
 import './style.css';
-import { Stage } from './sim/stage.js';
 import { Simulation } from './sim/simulation.js';
 import { bullwhipRatio } from './sim/stats.js';
 import { GameLoop } from './game/game-loop.js';
 import { Hud } from './ui/hud.js';
-import { StagePanels } from './ui/stage-panels.js';
+import { BuildingPanel } from './ui/building-panel.js';
 import { Charts } from './ui/charts.js';
 import { World3D } from './render/world3d.js';
 
@@ -12,26 +11,30 @@ const euro = new Intl.NumberFormat('en-IE', {
   style: 'currency', currency: 'EUR', maximumFractionDigits: 0,
 });
 
-function createSimulation() {
-    const stages = [
-    new Stage({ id: 'retailer',  name: 'Retailer',  leadTime: 2, lostSales: true }),
-    new Stage({ id: 'warehouse', name: 'Warehouse', leadTime: 2 }),
-    new Stage({ id: 'factory',   name: 'Factory',   leadTime: 3 }),
-    new Stage({ id: 'supplier',  name: 'Supplier',  infinite: true }),
-  ];
-  const seed = Math.floor(Math.random() * 1_000_000);
-  return new Simulation({ stages, seed, maxDays: 60 });
+const createSimulation = () => new Simulation({ seed: Math.floor(Math.random() * 1_000_000) });
+
+const messageEl = document.querySelector('#message');
+let sim = createSimulation();
+let selectedId = null;
+
+const world = new World3D(document.querySelector('#world'), { onSelect: selectStage });
+const panel = new BuildingPanel(document.querySelector('#panel'), { onClose: () => selectStage(null) });
+const charts = new Charts(document.querySelector('#charts'));
+
+// Selecting from the 3D world or closing the panel keeps both in sync
+function selectStage(id) {
+  selectedId = id;
+  world.select(id);
+  if (id) panel.show(sim.stage(id), sim);
+  else panel.hide();
 }
 
-const chainEl = document.querySelector('#chain');
-const messageEl = document.querySelector('#message');
-
-let sim = createSimulation();
-let panels = new StagePanels(chainEl, sim.stages);
-
-const stageNames = Object.fromEntries(sim.stages.map((s) => [s.id, s.name]));
-const charts = new Charts(document.querySelector('#charts'), stageNames);
-const world = new World3D(document.querySelector('#world'));
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    selectStage(null);
+    world.resetView();
+  }
+});
 
 const loop = new GameLoop({
   onTick: tick,
@@ -47,10 +50,15 @@ const hud = new Hud(document.querySelector('#hud'), {
   },
   onSpeed: (speed) => loop.setSpeed(speed),
   onRestart: restart,
+  onReports: () => {
+    const shown = charts.toggle();
+    charts.update(sim);
+    return shown;
+  },
 });
 
 function tick() {
-  sim.step(panels.getPlayerOrders());
+  sim.step();
   render();
   if (sim.isOver) {
     loop.pause();
@@ -61,23 +69,24 @@ function tick() {
 
 function render() {
   hud.update(sim);
-  panels.update(sim);
-  charts.update(sim.history);
+  panel.update(sim);
+  charts.update(sim);
 }
 
 function showSummary() {
-  const totalCost = sim.stages.reduce((sum, s) => sum + s.totalCost, 0);
+  const storage = sim.stages.reduce((sum, s) => sum + s.totalCost, 0);
   const ratios = sim.stages
     .filter((s) => !s.infinite)
-    .map((s) => `<li>${s.name}: <strong>${bullwhipRatio(sim.history, s.id).toFixed(2)}</strong></li>`)
+    .map((s) => `<li>${s.name}: <strong>${bullwhipRatio(sim.history, s).toFixed(2)}</strong></li>`)
     .join('');
 
   messageEl.innerHTML = `
     <h2>Game over after ${sim.maxDays} days</h2>
     <p>Final cash: <strong>${euro.format(sim.cash)}</strong></p>
     <p>Service level: <strong>${Math.round(sim.serviceLevel * 100)}%</strong></p>
-    <p>Total holding and shortage costs: <strong>${euro.format(totalCost)}</strong></p>
-    <p>Bullwhip ratio (order variance ÷ demand variance, 1.00 = no amplification):</p>
+    <p>Transport costs: <strong>${euro.format(sim.totalTransport)}</strong> ·
+       Storage and shortage costs: <strong>${euro.format(storage)}</strong></p>
+    <p>Bullwhip ratio (order variance ÷ demand variance, 1.00 = orders as steady as demand):</p>
     <ul>${ratios}</ul>
     <p class="muted">Press Restart to play again.</p>`;
 }
@@ -87,8 +96,8 @@ function restart() {
   loop.reset();
   hud.setPlaying(false);
   sim = createSimulation();
-  panels = new StagePanels(chainEl, sim.stages);
   messageEl.innerHTML = '';
+  if (selectedId) panel.show(sim.stage(selectedId), sim);
   render();
 }
 

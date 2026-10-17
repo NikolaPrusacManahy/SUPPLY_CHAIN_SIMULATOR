@@ -9,12 +9,18 @@ export const MODEL_FILES = {
   supplier: 'industrial/building-c.glb',
   factory: 'industrial/building-m.glb',
   warehouse: 'industrial/building-j.glb',
-  retailer: 'industrial/building-p.glb',
+  shop: 'industrial/building-p.glb',
+  townA: 'industrial/building-a.glb',
+  townD: 'industrial/building-d.glb',
+  townG: 'industrial/building-g.glb',
+  townH: 'industrial/building-h.glb',
   tank: 'industrial/detail-tank-large.glb',
   waterTower: 'industrial/water-tower.glb',
   containerA: 'industrial/shipping-container-a.glb',
   containerB: 'industrial/shipping-container-b.glb',
-  truck: 'cars/delivery.glb',
+  van: 'cars/van.glb',
+  box: 'cars/delivery.glb',
+  lorry: 'cars/delivery-flat.glb',
 };
 
 // Loads every model in parallel. Resolves to { key: THREE.Object3D }.

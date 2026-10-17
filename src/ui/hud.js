@@ -3,7 +3,7 @@ const euro = new Intl.NumberFormat('en-IE', {
 });
 
 export class Hud {
-  constructor(root, { onPlayPause, onSpeed, onRestart }) {
+  constructor(root, { onPlayPause, onSpeed, onRestart, onReports }) {
     root.innerHTML = `
       <div class="hud-stats">
         <span>Day <strong data-day>0</strong> / <span data-max></span></span>
@@ -18,6 +18,7 @@ export class Hud {
         <button data-speed="2">2x</button>
         <button data-speed="4">4x</button>
         <button data-speed="10">10x</button>
+        <button data-reports>Reports</button>
         <button data-restart>Restart</button>
       </div>`;
 
@@ -31,6 +32,10 @@ export class Hud {
 
     this.playBtn.addEventListener('click', onPlayPause);
     root.querySelector('[data-restart]').addEventListener('click', onRestart);
+    this.reportsBtn = root.querySelector('[data-reports]');
+    this.reportsBtn.addEventListener('click', () => {
+      this.reportsBtn.classList.toggle('active', onReports());
+    });
 
     const speedBtns = root.querySelectorAll('[data-speed]');
     speedBtns.forEach((btn) =>

@@ -34,6 +34,13 @@ const CONVOY_GAP = 4; // world units between trucks sent on the same day
 
 const v3 = ([x, z], y = ROAD_Y) => new THREE.Vector3(x, y, z);
 
+// Keyboard camera movement: [forward, right] per key
+const MOVE_KEYS = {
+  w: [1, 0], s: [-1, 0], a: [0, -1], d: [0, 1],
+  arrowup: [1, 0], arrowdown: [-1, 0], arrowleft: [0, -1], arrowright: [0, 1],
+};
+const MAP_BOUNDS = { minX: -75, maxX: 60, minZ: -55, maxZ: 70 }; // how far the camera can move
+
 export class World3D {
   // onSelect(stageId | null) is called when the player clicks a building or empty ground
   constructor(container, { onSelect } = {}) {
@@ -63,6 +70,8 @@ export class World3D {
     this.controls.maxPolarAngle = Math.PI / 2.2; // stop the camera going under the ground
     this.controls.minDistance = 15;
     this.controls.maxDistance = 170;
+    this.controls.screenSpacePanning = false; // right-drag pans along the ground
+    // Left-drag rotates, right-drag pans (optional), scroll zooms; WASD moves (see setupKeys)
 
     // Camera glide used when a building is selected. Any drag by the player cancels it.
     this.lastFrame = performance.now();
@@ -85,6 +94,8 @@ export class World3D {
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
     this.setupPicking();
+    this.keys = new Set();
+    this.setupKeys();
 
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
@@ -313,6 +324,43 @@ export class World3D {
     });
   }
 
+  // WASD / arrow keys move the camera. Ignored while typing in an input.
+  setupKeys() {
+    window.addEventListener('keydown', (e) => {
+      const key = e.key.toLowerCase();
+      if (!MOVE_KEYS[key] || e.target.closest?.('input, select, textarea')) return;
+      e.preventDefault(); // stop arrow keys scrolling the page
+      this.keys.add(key);
+      this.focus = null; // moving by hand cancels a camera glide
+    });
+    window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
+    window.addEventListener('blur', () => this.keys.clear()); // avoid stuck keys after alt-tab
+  }
+
+  moveCamera(dt) {
+    if (!this.keys.size) return;
+    let forwardAmount = 0;
+    let rightAmount = 0;
+    for (const key of this.keys) {
+      forwardAmount += MOVE_KEYS[key][0];
+      rightAmount += MOVE_KEYS[key][1];
+    }
+    // Forward = the way the camera looks, flattened onto the ground
+    const forward = this.controls.target.clone().sub(this.camera.position).setY(0).normalize();
+    const right = new THREE.Vector3().crossVectors(forward, this.camera.up).normalize();
+    const speed = this.camera.position.distanceTo(this.controls.target) * 0.9; // faster when zoomed out
+    const move = forward.multiplyScalar(forwardAmount).add(right.multiplyScalar(rightAmount));
+    if (move.lengthSq() === 0) return;
+    move.normalize().multiplyScalar(speed * dt);
+
+    const target = this.controls.target.clone().add(move);
+    target.x = THREE.MathUtils.clamp(target.x, MAP_BOUNDS.minX, MAP_BOUNDS.maxX);
+    target.z = THREE.MathUtils.clamp(target.z, MAP_BOUNDS.minZ, MAP_BOUNDS.maxZ);
+    const applied = target.sub(this.controls.target);
+    this.controls.target.add(applied);
+    this.camera.position.add(applied);
+  }
+
   // Returns the stage id of the building under the mouse, or null
   pickBuilding(e) {
     const rect = this.renderer.domElement.getBoundingClientRect();
@@ -349,8 +397,9 @@ export class World3D {
 
   updateCamera() {
     const now = performance.now();
-    const dt = (now - this.lastFrame) / 1000;
+    const dt = Math.min((now - this.lastFrame) / 1000, 0.1);
     this.lastFrame = now;
+    this.moveCamera(dt);
     if (!this.focus) return;
     const a = 1 - Math.exp(-dt * 5); // smooth, frame-rate independent ease
     this.controls.target.lerp(this.focus.target, a);

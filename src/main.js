@@ -52,6 +52,7 @@ const hud = new Hud(document.querySelector('#hud'), {
   onRestart: restart,
   onReports: () => {
     const shown = charts.toggle();
+    document.querySelector('#stage').classList.toggle('reports-open', shown);
     charts.update(sim);
     return shown;
   },

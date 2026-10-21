@@ -2,11 +2,13 @@ import { createRng } from './random.js';
 import { generateEvents } from './events.js';
 import { Stage } from './stage.js';
 import { NODES, KM_PER_UNIT, routeLength } from './network.js';
+
+const TRUCK_SPACING_KM = 13.5; // gap between trucks of one convoy as they leave the depot
 import { tripTimes } from './trucks.js';
 import { generateIncidents, FACTORY_REPAIR } from './incidents.js';
 
 export class Simulation {
-  constructor({ nodes = NODES, seed = 1, startCash = 5000, salePrice = 25, rawCost = 8,
+  constructor({ nodes = NODES, seed = 1, startCash = 12000, salePrice = 30, rawCost = 8,
                 demandSpread = 0.4, maxDays = 60 } = {}) {
     Object.assign(this, { seed, salePrice, rawCost, demandSpread, maxDays });
 
@@ -38,6 +40,8 @@ export class Simulation {
     // Separate random stream, so incidents never change the customer demand of a seed
     this.incidents = generateIncidents(createRng(seed ^ 0x5bd1e995), maxDays);
     this.repairCosts = 0;
+    this.deliveryLog = []; // deliveries/production since the UI last asked, for pop-ups
+    this.time = 0;         // current time in days, including the fraction of the day
     this.day = 0;
     this.cash = startCash;
     this.lastDemand = 0;
@@ -114,25 +118,54 @@ export class Simulation {
     }
     const truck = to.truckType;
     const { load, drive } = tripTimes(to.distance, to.truck);
-    const departAt = day + load;          // trucks load first, then leave
-    const driveEnd = departAt + drive;    // arrival time at the destination
-    const arrivesOn = Math.max(day + 1, Math.ceil(driveEnd)); // unloaded at the start of a day
+    // One loading bay: each truck of a convoy leaves a little after the one before
+    const spacing = TRUCK_SPACING_KM / truck.speed;
     let left = qty;
     let cost = 0;
     for (let i = 0; left > 0; i++) {
       const units = Math.min(truck.capacity, left);
       left -= units;
-      to.inTransit.push({ qty: units, truck: truck.id, sentOn: day, departAt, driveEnd, arrivesOn, convoyIndex: i });
+      const departAt = day + load + i * spacing; // loaded, then leaves
+      const driveEnd = departAt + drive;          // reaches the destination; goods are added then
+      to.inTransit.push({ qty: units, truck: truck.id, sentOn: day, departAt, driveEnd });
       cost += truck.tripCost;
     }
     to.transportCost += cost;
     return cost;
   }
 
+  // Called every frame with the current time (day + fraction): unloads trucks the
+  // moment they arrive, so stock changes when a truck reaches a building, not at the next day
+  advanceTo(time) {
+    this.time = Math.max(this.time, time);
+    for (const s of this.stages) this.deliveryLog.push(...s.receive(this.time));
+  }
+
+  // Units being loaded onto trucks that have not left yet
+  loadingOut(stage) {
+    let total = 0;
+    for (const d of stage.downstreams) {
+      for (const s of d.inTransit) if (s.departAt > this.time) total += s.qty;
+    }
+    return total;
+  }
+
+  // What the player sees at a building: goods count as still there until their truck drives off
+  onHand(stage) {
+    return stage.stock + this.loadingOut(stage);
+  }
+
+  // Deliveries since the last call (the UI shows them as pop-ups)
+  takeDeliveries() {
+    const log = this.deliveryLog;
+    this.deliveryLog = [];
+    return log;
+  }
+
   step() {
     const day = ++this.day;
     for (const s of this.stages) s.broken = this.isBroken(s.id, day);
-    for (const s of this.stages) s.receive(day);
+    this.advanceTo(day); // catch up on anything that arrived since the last frame
 
     let demand = 0;
     let sold = 0;

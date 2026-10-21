@@ -14,9 +14,11 @@ const STYLE = {
 
 // Decoration only, no game logic: [model key, x, z, footprint, rotation]
 const DECOR = [
-  ['tank', -63, -33, 3.5, 0],
-  ['tank', -64, -17, 3, 0],
-  ['waterTower', -35, -36, 3.5, 0],
+  ['tank', -129, -59, 3.5, 0],
+  ['tank', -130, -41, 3, 0],
+  ['waterTower', -71, -61, 3.5, 0],
+  ['containerA', -49, -61, 3.5, 0],
+  ['containerB', -49, -57, 3.5, 0],
   ['containerA', 10, 16, 3.5, Math.PI / 2],
   ['containerB', 14.5, 14, 3.5, Math.PI / 2],
   // Northgate
@@ -30,7 +32,6 @@ const DECOR = [
 const TRUCK_LENGTH = { van: 2.4, box: 2.8, lorry: 3.4 };
 const TRUCK_COLOR = { van: 0x378add, box: 0xef9f27, lorry: 0x639922 };
 const ROAD_Y = 0.1;
-const CONVOY_GAP = 4; // world units between trucks sent on the same day
 
 const v3 = ([x, z], y = ROAD_Y) => new THREE.Vector3(x, y, z);
 
@@ -39,7 +40,7 @@ const MOVE_KEYS = {
   w: [1, 0], s: [-1, 0], a: [0, -1], d: [0, 1],
   arrowup: [1, 0], arrowdown: [-1, 0], arrowleft: [0, -1], arrowright: [0, 1],
 };
-const MAP_BOUNDS = { minX: -75, maxX: 60, minZ: -55, maxZ: 70 }; // how far the camera can move
+const MAP_BOUNDS = { minX: -135, maxX: 60, minZ: -70, maxZ: 75 }; // how far the camera can move
 
 export class World3D {
   // onSelect(stageId | null) is called when the player clicks a building or empty ground
@@ -52,7 +53,7 @@ export class World3D {
     this.scene.background = new THREE.Color(0xbfd9ea);
 
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.1, 600);
-    this.camera.position.set(-8, 95, 72);
+    this.camera.position.set(-37, 150, 112);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -65,11 +66,11 @@ export class World3D {
     container.append(this.labelRenderer.domElement);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.target.set(-8, 0, 10);
+    this.controls.target.set(-37, 0, 4);
     this.controls.enableDamping = true;
     this.controls.maxPolarAngle = Math.PI / 2.2; // stop the camera going under the ground
     this.controls.minDistance = 15;
-    this.controls.maxDistance = 170;
+    this.controls.maxDistance = 260;
     this.controls.screenSpacePanning = false; // right-drag pans along the ground
     // Left-drag rotates, right-drag pans (optional), scroll zooms; WASD moves (see setupKeys)
 
@@ -105,21 +106,21 @@ export class World3D {
   addLights() {
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a9a6a, 1.2));
     const sun = new THREE.DirectionalLight(0xffffff, 2);
-    sun.position.set(30, 60, 25);
-    sun.target.position.set(-5, 0, 5);
+    sun.position.set(-7, 90, 40);
+    sun.target.position.set(-37, 0, 4);
     sun.castShadow = true;
     sun.shadow.mapSize.set(4096, 4096);
-    Object.assign(sun.shadow.camera, { left: -85, right: 85, top: 85, bottom: -85, far: 200 });
+    Object.assign(sun.shadow.camera, { left: -125, right: 125, top: 125, bottom: -125, far: 300 });
     this.scene.add(sun, sun.target);
   }
 
   addGround() {
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(220, 170),
+      new THREE.PlaneGeometry(270, 190),
       new THREE.MeshStandardMaterial({ color: 0x9cc27a }),
     );
     ground.rotation.x = -Math.PI / 2;
-    ground.position.set(-5, 0, 7);
+    ground.position.set(-37, 0, 3);
     ground.receiveShadow = true;
     this.scene.add(ground);
   }
@@ -275,9 +276,8 @@ export class World3D {
     return holder;
   }
 
-  // One truck per shipment in the simulation. A truck first waits at the depot while it is loaded,
-  // then drives the route, then waits at the destination until it is unloaded next morning.
-  // Trucks sent together drive in a convoy.
+  // One truck per shipment in the simulation. A truck waits at the depot while it is loaded,
+  // then drives the route. The simulation removes it (and adds its goods) when it arrives.
   syncTrucks(sim, progress) {
     if (sim !== this.currentSim) {
       this.clearTrucks();
@@ -297,13 +297,9 @@ export class World3D {
           truck = this.createTruck(shipment.truck);
           this.trucks.set(shipment, truck);
         }
-        let d;
-        if (now < shipment.departAt) {
-          d = shipment.convoyIndex * CONVOY_GAP * 0.6; // loading: lined up at the depot
-        } else {
-          const t = (now - shipment.departAt) / (shipment.driveEnd - shipment.departAt);
-          d = THREE.MathUtils.clamp(t, 0, 1) * route.total - shipment.convoyIndex * CONVOY_GAP;
-        }
+        // Before departAt the truck sits at the depot being loaded (t = 0)
+        const t = (now - shipment.departAt) / (shipment.driveEnd - shipment.departAt);
+        const d = THREE.MathUtils.clamp(t, 0, 1) * route.total;
         this.pointAlong(route, d, truck.position);
         this.pointAlong(route, d + 0.5, ahead);
         if (ahead.distanceToSquared(truck.position) > 1e-4) truck.lookAt(ahead);
@@ -321,6 +317,22 @@ export class World3D {
   clearTrucks() {
     for (const truck of this.trucks.values()) this.scene.remove(truck);
     this.trucks.clear();
+  }
+
+  // Floating "+60" over a building that fades upwards, e.g. when a truck unloads
+  popup(stageId, text, kind) {
+    const b = this.buildings.get(stageId);
+    if (!b) return;
+    const div = document.createElement('div');
+    div.className = `popup popup-${kind}`;
+    div.innerHTML = `<span>${text}</span>`; // the renderer moves the div, CSS animates the span
+    const obj = new CSS2DObject(div);
+    obj.position.copy(b.label.position);
+    b.group.add(obj);
+    setTimeout(() => {
+      b.group.remove(obj);
+      div.remove();
+    }, 1600);
   }
 
   // A click is a press and release without dragging; a drag rotates the camera instead
@@ -434,7 +446,10 @@ export class World3D {
         continue;
       }
       const shortage = stage.lostSales ? stage.lastLost : stage.backlog;
-      b.labelDiv.textContent = `${shortName} · ${Math.round(stage.stock)}`;
+      const making = stage.processing.reduce((sum, p) => sum + p.qty, 0);
+      let text = `${shortName} · ${Math.round(sim.onHand(stage))}`;
+      if (making > 0) text += ` · making ${making}`;
+      b.labelDiv.textContent = text;
       b.labelDiv.classList.toggle('alert', shortage > 0);
       b.ring.visible = shortage > 0;
     }

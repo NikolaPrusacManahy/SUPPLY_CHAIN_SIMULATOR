@@ -102,6 +102,8 @@ export class BuildingPanel {
       <svg class="spark" data-f="spark" viewBox="0 0 200 40" preserveAspectRatio="none"><polyline /></svg>
       <dl>
         ${shopRows}
+        ${stage.downstreams.length ? '<dt>Being loaded onto trucks</dt><dd data-f="loading"></dd>' : ''}
+        ${stage.processingDays ? '<dt>In production</dt><dd data-f="making"></dd>' : ''}
         <dt>Forecast per day</dt><dd data-f="forecast"></dd>
         <dt>On order</dt><dd data-f="onorder"></dd>
         <dt>Delivery time</dt><dd data-f="lead"></dd>
@@ -196,7 +198,10 @@ export class BuildingPanel {
       el.hidden = sim.truckAvailable(el.dataset.truckStatus);
     }
 
-    set('stock', fmt(stage.stock));
+    set('stock', fmt(sim.onHand(stage)));
+    set('loading', fmt(sim.loadingOut(stage)));
+    set('making', fmt(stage.processing.reduce((sum, p) => sum + p.qty, 0)));
+
     set('demand', fmt(stage.lastDemand));
     set('sold', fmt(stage.lastSold));
     set('lost', fmt(stage.lastLost));
@@ -210,12 +215,13 @@ export class BuildingPanel {
     const lost = this.root.querySelector('[data-f="lost"]');
     if (lost) lost.classList.toggle('negative', stage.lastLost > 0);
 
-    // Trucks on the way, grouped by arrival day and truck type
+    // Trucks on the way, grouped by arrival day, truck type and whether they have left yet
     const groups = new Map();
     for (const s of stage.inTransit) {
-      const phase = sim.day < s.departAt ? 'loading' : sim.day < s.driveEnd ? 'on the road' : 'unloading';
-      const key = `${s.arrivesOn}|${s.truck}|${phase}`;
-      const g = groups.get(key) ?? { day: s.arrivesOn, truck: s.truck, qty: 0, count: 0, phase };
+      const phase = sim.time < s.departAt ? 'loading' : 'on the road';
+      const day = Math.floor(s.driveEnd); // arrives during this day
+      const key = `${day}|${s.truck}|${phase}`;
+      const g = groups.get(key) ?? { day, truck: s.truck, qty: 0, count: 0, phase };
       g.qty += s.qty;
       g.count += 1;
       groups.set(key, g);
@@ -225,9 +231,9 @@ export class BuildingPanel {
       list.push(`<li class="warn">Waiting at ${stage.upstream.name} · ${units(stage.waiting)} · ${stage.truckType.plural} out of service. Switch truck type to send them now.</li>`);
     }
     for (const g of [...groups.values()].sort((a, b) => a.day - b.day)) {
-      list.push(`<li>${g.count} × ${TRUCK_TYPES[g.truck].name} · ${units(g.qty)} · ${g.phase} · in stock day ${g.day}</li>`);
+      list.push(`<li>${g.count} × ${TRUCK_TYPES[g.truck].name} · ${units(g.qty)} · ${g.phase} · arrives day ${g.day}</li>`);
     }
-    for (const p of stage.processing) list.push(`<li>In production · ${units(p.qty)} · ready day ${p.readyOn}</li>`);
+    for (const p of stage.processing) list.push(`<li>In production · ${units(p.qty)} · ready day ${Math.floor(p.readyAt)}</li>`);
     this.root.querySelector('[data-f="incoming"]').innerHTML = list.join('') || '<li class="muted">Nothing on the way</li>';
 
     // Stock over the last 30 days

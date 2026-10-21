@@ -100,3 +100,15 @@ button.icon { padding: 0 8px; font-size: 20px; line-height: 28px; border-color: 
 .status button { background: #e24b4a; color: #fff; border-color: #e24b4a; align-self: flex-start; }
 .incoming li.warn { background: #faeeda; color: #633806; }
 .out-of-service { color: #a32d2d; font-weight: 600; }
+
+/* "+60" pop-ups when trucks unload or the factory finishes products */
+.popup { pointer-events: none; }
+.popup span { display: inline-block; font-weight: 700; font-size: 16px; padding: 1px 8px; border-radius: 6px;
+              background: #eaf3de; color: #27500a; animation: popup-rise 1.6s ease-out forwards; }
+.popup-raw span { background: #faeeda; color: #633806; }
+.popup-produced span { background: #e6f1fb; color: #0c447c; }
+@keyframes popup-rise {
+  0% { opacity: 0; transform: translateY(0); }
+  15% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-40px); }
+}

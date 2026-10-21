@@ -54,7 +54,17 @@ window.addEventListener('keydown', (e) => {
 
 const loop = new GameLoop({
   onTick: tick,
-  onFrame: (progress) => world.render(sim, progress),
+  onFrame: (progress) => {
+    // Unload trucks the moment they arrive, then show what was delivered
+    sim.advanceTo(sim.day + progress);
+    const deliveries = sim.takeDeliveries();
+    for (const d of deliveries) {
+      const text = d.kind === 'raw' ? `+${d.qty} raw` : d.kind === 'produced' ? `+${d.qty} made` : `+${d.qty}`;
+      world.popup(d.stageId, text, d.kind);
+    }
+    if (deliveries.length) panel.update(sim);
+    world.render(sim, progress);
+  },
 });
 
 const hud = new Hud(document.querySelector('#hud'), {

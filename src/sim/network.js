@@ -3,15 +3,16 @@
 export const KM_PER_UNIT = 3;
 
 export const NODES = [
-  { id: 'supplier', name: 'Supplier', type: 'supplier', pos: [-55, -25] },
+  // Supplier and factory are far out west; long roads make the truck choice matter
+  { id: 'supplier', name: 'Supplier', type: 'supplier', pos: [-120, -50] },
   {
-    id: 'factory', name: 'Factory', type: 'factory', pos: [-25, -25],
-    upstream: 'supplier', route: [[-55, -25], [-25, -25]],
+    id: 'factory', name: 'Factory', type: 'factory', pos: [-60, -50],
+    upstream: 'supplier', route: [[-120, -50], [-60, -50]], // 180 km
     truck: 'lorry', processingDays: 1, // raw material takes a day to turn into products
   },
   {
     id: 'warehouse', name: 'Warehouse', type: 'warehouse', pos: [0, 5],
-    upstream: 'factory', route: [[-25, -25], [-25, 5], [0, 5]],
+    upstream: 'factory', route: [[-60, -50], [-60, 5], [0, 5]], // 345 km
     truck: 'lorry',
   },
   {

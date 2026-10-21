@@ -1,5 +1,8 @@
 import { TRUCK_TYPES, travelDays } from './trucks.js';
 
+const SHOP_START_DAYS = 3; // shops open with about 3 days of stock
+const OUTLIER_LIMIT = 3;   // forecasts ignore anything above 3x the normal daily demand
+
 // One building in the network: supplier, factory, warehouse or shop.
 export class Stage {
   constructor({ id, name, type, distance = 0, truck = 'box', processingDays = 0, demand = 0,
@@ -20,9 +23,9 @@ export class Stage {
     this.stock = 0;
     this.manualQty = 20;
 
-    this.inTransit = [];   // trucks heading here: { qty, truck, sentOn, departAt, driveEnd, arrivesOn, convoyIndex }
+    this.inTransit = [];   // trucks heading here: { qty, truck, sentOn, departAt, driveEnd }
     this.waiting = 0;      // units ready to send here but stuck at the depot (truck type out of service)
-    this.processing = [];  // factory only: { qty, readyOn }
+    this.processing = [];  // factory only: { qty, readyAt }
     this.onOrder = 0;      // ordered upstream, not in stock yet
     this.owed = new Map();     // downstream id -> units ordered but not shipped yet (backlog)
     this.incoming = new Map(); // downstream id -> today's order
@@ -41,7 +44,9 @@ export class Stage {
     this.expectedDemand = expectedDemand;
     this.forecast = expectedDemand;
     this.manualQty = Math.round(expectedDemand);
-    this.stock = this.infinite ? 0 : this.targetFor(expectedDemand);
+    // Factory and warehouse start empty, so every unit has to come from the supplier.
+    // Shops start with a few days of stock to sell while the first deliveries are on the way.
+    this.stock = this.type === 'shop' ? Math.round(expectedDemand * SHOP_START_DAYS) : 0;
   }
 
   get truckType() {
@@ -76,24 +81,32 @@ export class Stage {
     return this.inTransit.reduce((sum, s) => sum + s.qty, 0);
   }
 
-  receive(day) {
-    const arrived = this.inTransit.filter((s) => s.arrivesOn <= day);
-    this.inTransit = this.inTransit.filter((s) => s.arrivesOn > day);
+  // Unloads every truck that has reached this building by `time` (in days, can be mid-day)
+  // and finishes production that is ready. Returns what happened, for pop-ups.
+  receive(time) {
+    const events = [];
+    const arrived = this.inTransit.filter((s) => s.driveEnd <= time);
+    this.inTransit = this.inTransit.filter((s) => s.driveEnd > time);
     for (const s of arrived) {
       if (this.processingDays > 0) {
-        this.processing.push({ qty: s.qty, readyOn: day + this.processingDays });
+        // Raw material: production starts when the truck arrives
+        this.processing.push({ qty: s.qty, readyAt: s.driveEnd + this.processingDays });
+        events.push({ stageId: this.id, kind: 'raw', qty: s.qty });
       } else {
         this.stock += s.qty;
         this.onOrder -= s.qty;
+        events.push({ stageId: this.id, kind: 'delivered', qty: s.qty });
       }
     }
-    if (this.broken) return; // a broken factory stops producing; goods wait in the queue
-    const ready = this.processing.filter((p) => p.readyOn <= day);
-    this.processing = this.processing.filter((p) => p.readyOn > day);
+    if (this.broken) return events; // a broken factory stops producing; goods wait in the queue
+    const ready = this.processing.filter((p) => p.readyAt <= time);
+    this.processing = this.processing.filter((p) => p.readyAt > time);
     for (const p of ready) {
       this.stock += p.qty;
       this.onOrder -= p.qty;
+      events.push({ stageId: this.id, kind: 'produced', qty: p.qty });
     }
+    return events;
   }
 
   // Shops: serve today's customers
@@ -132,8 +145,11 @@ export class Stage {
   }
 
   // Exponential smoothing: forecast moves a fraction (alpha) toward today's demand
+  // One-off orders far above normal (like everyone filling up on day 1) are capped,
+  // the way a manager would ignore an outlier, so they don't snowball up the chain.
   observeDemand(qty) {
-    this.forecast = this.alpha * qty + (1 - this.alpha) * this.forecast;
+    const capped = Math.min(qty, this.expectedDemand * OUTLIER_LIMIT);
+    this.forecast = this.alpha * capped + (1 - this.alpha) * this.forecast;
   }
 
   orderQty() {

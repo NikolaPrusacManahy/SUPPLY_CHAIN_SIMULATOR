@@ -2,7 +2,8 @@ import { createRng } from './random.js';
 import { generateEvents } from './events.js';
 import { Stage } from './stage.js';
 import { NODES, KM_PER_UNIT, routeLength } from './network.js';
-import { travelDays } from './trucks.js';
+import { tripTimes } from './trucks.js';
+import { generateIncidents, FACTORY_REPAIR } from './incidents.js';
 
 export class Simulation {
   constructor({ nodes = NODES, seed = 1, startCash = 5000, salePrice = 25, rawCost = 8,
@@ -34,6 +35,9 @@ export class Simulation {
 
     this.rng = createRng(seed);
     this.events = generateEvents(this.rng, maxDays);
+    // Separate random stream, so incidents never change the customer demand of a seed
+    this.incidents = generateIncidents(createRng(seed ^ 0x5bd1e995), maxDays);
+    this.repairCosts = 0;
     this.day = 0;
     this.cash = startCash;
     this.lastDemand = 0;
@@ -64,6 +68,37 @@ export class Simulation {
     return this.eventOn(this.day);
   }
 
+  incidentsOn(day) {
+    return this.incidents.filter((i) => day >= i.startDay && day <= i.endDay);
+  }
+
+  get activeIncidents() {
+    return this.incidentsOn(this.day);
+  }
+
+  // Incidents that started today (used to alert the player)
+  get newIncidents() {
+    return this.incidents.filter((i) => i.startDay === this.day);
+  }
+
+  isBroken(stageId, day = this.day) {
+    return this.incidentsOn(day).some((i) => i.kind !== 'trucks' && i.target === stageId);
+  }
+
+  truckAvailable(truckId, day = this.day) {
+    return !this.incidentsOn(day).some((i) => i.kind === 'trucks' && i.target === truckId);
+  }
+
+  // Pay to get a broken factory fixed: it works again after one more day
+  payRepair(incident) {
+    if (incident.kind !== 'factory' || incident.paid || incident.endDay < this.day) return false;
+    incident.paid = true;
+    incident.endDay = Math.min(incident.endDay, this.day + FACTORY_REPAIR.paidDays);
+    this.cash -= FACTORY_REPAIR.cost;
+    this.repairCosts += FACTORY_REPAIR.cost;
+    return true;
+  }
+
   customerDemand(shop, day) {
     const multiplier = this.eventOn(day)?.multiplier ?? 1;
     const offset = (this.rng() * 2 - 1) * this.demandSpread * shop.demandMean;
@@ -71,15 +106,23 @@ export class Simulation {
   }
 
   // Sends goods as one or more trucks of the route's chosen type. Returns the trip cost.
+  // If that truck type is out of service the goods wait at the depot instead.
   dispatch(to, qty, day) {
+    if (!this.truckAvailable(to.truck, day)) {
+      to.waiting += qty;
+      return 0;
+    }
     const truck = to.truckType;
-    const arrivesOn = day + travelDays(to.distance, to.truck);
+    const { load, drive } = tripTimes(to.distance, to.truck);
+    const departAt = day + load;          // trucks load first, then leave
+    const driveEnd = departAt + drive;    // arrival time at the destination
+    const arrivesOn = Math.max(day + 1, Math.ceil(driveEnd)); // unloaded at the start of a day
     let left = qty;
     let cost = 0;
     for (let i = 0; left > 0; i++) {
-      const load = Math.min(truck.capacity, left);
-      left -= load;
-      to.inTransit.push({ qty: load, truck: truck.id, departedOn: day, arrivesOn, convoyIndex: i });
+      const units = Math.min(truck.capacity, left);
+      left -= units;
+      to.inTransit.push({ qty: units, truck: truck.id, sentOn: day, departAt, driveEnd, arrivesOn, convoyIndex: i });
       cost += truck.tripCost;
     }
     to.transportCost += cost;
@@ -88,11 +131,22 @@ export class Simulation {
 
   step() {
     const day = ++this.day;
+    for (const s of this.stages) s.broken = this.isBroken(s.id, day);
     for (const s of this.stages) s.receive(day);
 
     let demand = 0;
     let sold = 0;
     let transport = 0;
+
+    // Goods held back by a truck outage leave as soon as the route's truck type is available.
+    // Switching the route to another truck type gets them moving again.
+    for (const s of this.stages) {
+      if (s.waiting > 0 && this.truckAvailable(s.truck, day)) {
+        const qty = s.waiting;
+        s.waiting = 0;
+        transport += this.dispatch(s, qty, day);
+      }
+    }
     for (const s of this.processOrder) {
       if (s.type === 'shop') {
         const d = this.customerDemand(s, day);

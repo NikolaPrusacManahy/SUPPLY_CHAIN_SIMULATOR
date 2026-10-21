@@ -10,6 +10,8 @@ export class Stage {
     this.lostSales = type === 'shop';    // customers leave; businesses wait (backlog)
     this.shortageCost = this.lostSales ? 3 : 1;
     this.demandMean = demand;            // customer demand (shops only)
+    this.dailyCapacity = this.infinite ? 60 : Infinity; // supplier: most it can ship per day
+    this.broken = false;                 // set each day by the simulation (supplier/factory incidents)
 
     this.upstream = null;
     this.downstreams = [];
@@ -18,7 +20,8 @@ export class Stage {
     this.stock = 0;
     this.manualQty = 20;
 
-    this.inTransit = [];   // trucks heading here: { qty, truck, departedOn, arrivesOn, convoyIndex }
+    this.inTransit = [];   // trucks heading here: { qty, truck, sentOn, departAt, driveEnd, arrivesOn, convoyIndex }
+    this.waiting = 0;      // units ready to send here but stuck at the depot (truck type out of service)
     this.processing = [];  // factory only: { qty, readyOn }
     this.onOrder = 0;      // ordered upstream, not in stock yet
     this.owed = new Map();     // downstream id -> units ordered but not shipped yet (backlog)
@@ -84,6 +87,7 @@ export class Stage {
         this.onOrder -= s.qty;
       }
     }
+    if (this.broken) return; // a broken factory stops producing; goods wait in the queue
     const ready = this.processing.filter((p) => p.readyOn <= day);
     this.processing = this.processing.filter((p) => p.readyOn > day);
     for (const p of ready) {
@@ -109,7 +113,8 @@ export class Stage {
     this.incoming.clear();
 
     const total = owedNow.reduce((sum, [, qty]) => sum + qty, 0);
-    const available = this.infinite ? total : Math.min(this.stock, total);
+    let available = this.infinite ? Math.min(total, this.dailyCapacity) : Math.min(this.stock, total);
+    if (this.infinite && this.broken) available = 0; // damaged supplier ships nothing
     const plan = owedNow.map(([d, owed]) => ({ to: d, owed, qty: total ? Math.floor((available * owed) / total) : 0 }));
 
     // Hand out units lost to rounding, biggest remaining need first

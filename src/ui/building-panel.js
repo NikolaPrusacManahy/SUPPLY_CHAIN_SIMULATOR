@@ -1,4 +1,5 @@
 import { TRUCK_TYPES, travelDays } from '../sim/trucks.js';
+import { describeIncident, FACTORY_REPAIR } from '../sim/incidents.js';
 
 const fmt = (n) => Math.round(n).toLocaleString('en-IE');
 const euro = (n) => `€${fmt(n)}`;
@@ -20,15 +21,18 @@ const UPGRADES = [
 // Side panel for the selected building: Overview, Manage and Upgrade tabs.
 // The structure is built once per selection; update() only changes text, so inputs keep focus.
 export class BuildingPanel {
-  constructor(root, { onClose }) {
+  constructor(root, { onClose, onRepair }) {
     this.root = root;
     this.onClose = onClose;
+    this.onRepair = onRepair;
+    this.statusKey = '';
     this.stage = null;
     this.tab = 'overview';
   }
 
   show(stage, sim) {
     this.stage = stage;
+    this.statusKey = '';
     this.root.hidden = false;
     const hasManage = !stage.infinite;
     if (!hasManage) this.tab = 'overview';
@@ -46,6 +50,7 @@ export class BuildingPanel {
         ${hasManage ? '<button data-tab="manage">Manage</button>' : ''}
         <button data-tab="upgrade">Upgrade</button>
       </nav>
+      <div class="status" data-f="status" hidden></div>
       <section data-page="overview">${this.overviewHtml(stage)}</section>
       ${hasManage ? `<section data-page="manage">${this.manageHtml(stage)}</section>` : ''}
       <section data-page="upgrade">${this.upgradeHtml()}</section>`;
@@ -67,7 +72,7 @@ export class BuildingPanel {
 
   subtitle(stage) {
     switch (stage.type) {
-      case 'supplier': return 'Sells raw material to the factory';
+      case 'supplier': return `Produces raw material, up to ${stage.dailyCapacity} units a day`;
       case 'factory': return `Turns raw material into products in ${stage.processingDays} day`;
       case 'warehouse': return 'Supplies all three shops';
       default: return `Sells to local customers (about ${stage.demandMean} a day)`;
@@ -83,8 +88,9 @@ export class BuildingPanel {
   overviewHtml(stage) {
     if (stage.infinite) {
       return `<dl>
-        <dt>Stock</dt><dd>Unlimited</dd>
+        <dt>Production per day</dt><dd>${stage.dailyCapacity} units</dd>
         <dt>Shipped today</dt><dd data-f="shipped"></dd>
+        <dt>Still owed to the factory</dt><dd data-f="backlog"></dd>
       </dl>
       <p class="muted">Raw material is paid for when it leaves the supplier.</p>`;
     }
@@ -114,7 +120,8 @@ export class BuildingPanel {
       <button class="truck-option" data-truck="${t.id}">
         <strong>${t.name}</strong>
         <span>${t.capacity} units · ${travelDays(stage.distance, t.id)} day trip · €${t.tripCost} per trip</span>
-        <span class="muted">€${(t.tripCost / t.capacity).toFixed(2)} per unit when full</span>
+        <span class="muted">€${(t.tripCost / t.capacity).toFixed(2)} per unit when full · loading ${t.loadDays} day</span>
+        <span class="out-of-service" data-truck-status="${t.id}" hidden>Out of service</span>
       </button>`).join('');
     return `
       <h3>Ordering</h3>
@@ -154,6 +161,25 @@ export class BuildingPanel {
     syncTruck();
   }
 
+  // Warning box with the building's current problem, and a repair button for the factory
+  updateStatus(sim) {
+    const incident = sim.activeIncidents.find((i) => i.target === this.stage.id);
+    const box = this.root.querySelector('[data-f="status"]');
+    const key = incident ? `${incident.id}:${incident.paid}:${incident.endDay}` : '';
+    if (key === this.statusKey) return;
+    this.statusKey = key;
+    box.hidden = !incident;
+    if (!incident) return;
+    box.innerHTML = `<strong>${incident.paid ? '🔧' : '🔥'} ${describeIncident(incident)}</strong>
+      <span>Back to normal on day ${incident.endDay + 1}.</span>`;
+    if (incident.kind === 'factory' && !incident.paid) {
+      const btn = document.createElement('button');
+      btn.textContent = `Pay €${FACTORY_REPAIR.cost} to repair in ${FACTORY_REPAIR.paidDays} day`;
+      btn.addEventListener('click', () => this.onRepair(incident));
+      box.append(btn);
+    }
+  }
+
   update(sim) {
     const stage = this.stage;
     if (!stage) return;
@@ -162,7 +188,13 @@ export class BuildingPanel {
       if (el) el.textContent = text;
     };
     set('shipped', fmt(stage.lastShipped));
+    set('backlog', fmt(stage.backlog));
+    this.updateStatus(sim);
     if (stage.infinite) return;
+
+    for (const el of this.root.querySelectorAll('[data-truck-status]')) {
+      el.hidden = sim.truckAvailable(el.dataset.truckStatus);
+    }
 
     set('stock', fmt(stage.stock));
     set('demand', fmt(stage.lastDemand));
@@ -181,14 +213,20 @@ export class BuildingPanel {
     // Trucks on the way, grouped by arrival day and truck type
     const groups = new Map();
     for (const s of stage.inTransit) {
-      const key = `${s.arrivesOn}|${s.truck}`;
-      const g = groups.get(key) ?? { day: s.arrivesOn, truck: s.truck, qty: 0, count: 0 };
+      const phase = sim.day < s.departAt ? 'loading' : sim.day < s.driveEnd ? 'on the road' : 'unloading';
+      const key = `${s.arrivesOn}|${s.truck}|${phase}`;
+      const g = groups.get(key) ?? { day: s.arrivesOn, truck: s.truck, qty: 0, count: 0, phase };
       g.qty += s.qty;
       g.count += 1;
       groups.set(key, g);
     }
-    const list = [...groups.values()].sort((a, b) => a.day - b.day).map((g) =>
-      `<li>${g.count} × ${TRUCK_TYPES[g.truck].name} · ${units(g.qty)} · day ${g.day}</li>`);
+    const list = [];
+    if (stage.waiting > 0) {
+      list.push(`<li class="warn">Waiting at ${stage.upstream.name} · ${units(stage.waiting)} · ${stage.truckType.plural} out of service. Switch truck type to send them now.</li>`);
+    }
+    for (const g of [...groups.values()].sort((a, b) => a.day - b.day)) {
+      list.push(`<li>${g.count} × ${TRUCK_TYPES[g.truck].name} · ${units(g.qty)} · ${g.phase} · in stock day ${g.day}</li>`);
+    }
     for (const p of stage.processing) list.push(`<li>In production · ${units(p.qty)} · ready day ${p.readyOn}</li>`);
     this.root.querySelector('[data-f="incoming"]').innerHTML = list.join('') || '<li class="muted">Nothing on the way</li>';
 

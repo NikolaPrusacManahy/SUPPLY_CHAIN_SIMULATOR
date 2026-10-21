@@ -144,6 +144,15 @@ export class World3D {
     const selectRing = this.makeRing(style.footprint * 0.74, style.footprint * 0.8, 0x378add, 0.16); // selected
     group.add(ring, selectRing);
 
+    // Blinking flame shown above a broken supplier or factory
+    const flameDiv = document.createElement('div');
+    flameDiv.className = 'incident-flame';
+    flameDiv.innerHTML = '<span>🔥</span>'; // the renderer moves the div, CSS animates the span
+    const flame = new CSS2DObject(flameDiv);
+    flame.position.set(0, h + 4.5, 0);
+    flame.visible = false;
+    group.add(flame);
+
     const labelDiv = document.createElement('div');
     labelDiv.className = 'world-label';
     labelDiv.addEventListener('click', () => this.onSelect(node.id)); // labels are clickable too
@@ -151,7 +160,7 @@ export class World3D {
     label.position.set(0, h + 1.5, 0);
     group.add(label);
 
-    this.buildings.set(node.id, { group, placeholder, label, labelDiv, ring, selectRing });
+    this.buildings.set(node.id, { group, placeholder, label, labelDiv, ring, selectRing, flame });
   }
 
   makeRing(inner, outer, color, y) {
@@ -224,6 +233,7 @@ export class World3D {
       b.group.remove(b.placeholder);
       b.group.add(model);
       b.label.position.y = height + 1.5;
+      b.flame.position.y = height + 4.5;
     }
 
     for (const [key, x, z, size, rot] of DECOR) {
@@ -265,8 +275,9 @@ export class World3D {
     return holder;
   }
 
-  // One truck per shipment in the simulation; created when it departs, removed when it arrives.
-  // Its position is how far through the trip it is; trucks sent together drive in a convoy.
+  // One truck per shipment in the simulation. A truck first waits at the depot while it is loaded,
+  // then drives the route, then waits at the destination until it is unloaded next morning.
+  // Trucks sent together drive in a convoy.
   syncTrucks(sim, progress) {
     if (sim !== this.currentSim) {
       this.clearTrucks();
@@ -286,8 +297,13 @@ export class World3D {
           truck = this.createTruck(shipment.truck);
           this.trucks.set(shipment, truck);
         }
-        const t = (now - shipment.departedOn) / (shipment.arrivesOn - shipment.departedOn);
-        const d = THREE.MathUtils.clamp(t, 0, 1) * route.total - shipment.convoyIndex * CONVOY_GAP;
+        let d;
+        if (now < shipment.departAt) {
+          d = shipment.convoyIndex * CONVOY_GAP * 0.6; // loading: lined up at the depot
+        } else {
+          const t = (now - shipment.departAt) / (shipment.driveEnd - shipment.departAt);
+          d = THREE.MathUtils.clamp(t, 0, 1) * route.total - shipment.convoyIndex * CONVOY_GAP;
+        }
         this.pointAlong(route, d, truck.position);
         this.pointAlong(route, d + 0.5, ahead);
         if (ahead.distanceToSquared(truck.position) > 1e-4) truck.lookAt(ahead);
@@ -412,6 +428,7 @@ export class World3D {
       const b = this.buildings.get(stage.id);
       if (!b) continue;
       const shortName = stage.type === 'shop' ? stage.name.replace(' Shop', '') : stage.name;
+      b.flame.visible = sim.isBroken(stage.id);
       if (stage.infinite) {
         b.labelDiv.textContent = shortName;
         continue;

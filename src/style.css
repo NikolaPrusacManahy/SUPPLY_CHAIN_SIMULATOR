@@ -78,3 +78,25 @@ button.icon { padding: 0 8px; font-size: 20px; line-height: 28px; border-color: 
 #controls-hint { position: absolute; left: 12px; bottom: 12px; z-index: 1; pointer-events: none;
                  background: rgba(255, 255, 255, 0.85); border-radius: 6px; padding: 4px 10px;
                  font-size: 12px; color: #555; }
+
+/* Incidents */
+.incident-flame { font-size: 40px; pointer-events: none; }
+.incident-flame span { display: inline-block; animation: flame-blink 0.9s ease-in-out infinite; }
+@keyframes flame-blink {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.25; transform: scale(0.8); }
+}
+#alerts { position: absolute; top: 12px; left: 12px; z-index: 2; width: 330px;
+          display: flex; flex-direction: column; gap: 6px; }
+.alert { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: #fff;
+         border: 1px solid #f0997b; border-left: 4px solid #e24b4a; border-radius: 0 8px 8px 0;
+         padding: 6px 10px; font-size: 13px; }
+.alert.clickable { cursor: pointer; }
+.alert div { display: flex; flex-direction: column; flex: 1; }
+.alert-icon { font-size: 20px; }
+.alert button { padding: 3px 10px; font-size: 13px; background: #e24b4a; color: #fff; border-color: #e24b4a; }
+.status { background: #fcebeb; color: #791f1f; border-radius: 8px; padding: 8px 10px;
+          display: flex; flex-direction: column; gap: 6px; }
+.status button { background: #e24b4a; color: #fff; border-color: #e24b4a; align-self: flex-start; }
+.incoming li.warn { background: #faeeda; color: #633806; }
+.out-of-service { color: #a32d2d; font-weight: 600; }

@@ -6,19 +6,35 @@ import { Hud } from './ui/hud.js';
 import { BuildingPanel } from './ui/building-panel.js';
 import { Charts } from './ui/charts.js';
 import { World3D } from './render/world3d.js';
+import { Alerts } from './ui/alerts.js';
 
 const euro = new Intl.NumberFormat('en-IE', {
   style: 'currency', currency: 'EUR', maximumFractionDigits: 0,
 });
 
-const createSimulation = () => new Simulation({ seed: Math.floor(Math.random() * 1_000_000) });
+// A fixed seed can be given in the address bar (e.g. ?seed=42) to replay the same game
+const urlSeed = Number(new URLSearchParams(location.search).get('seed'));
+const createSimulation = () => new Simulation({
+  seed: urlSeed > 0 ? urlSeed : Math.floor(Math.random() * 1_000_000),
+});
 
 const messageEl = document.querySelector('#message');
 let sim = createSimulation();
 let selectedId = null;
 
 const world = new World3D(document.querySelector('#world'), { onSelect: selectStage });
-const panel = new BuildingPanel(document.querySelector('#panel'), { onClose: () => selectStage(null) });
+const panel = new BuildingPanel(document.querySelector('#panel'), {
+  onClose: () => selectStage(null),
+  onRepair: payRepair,
+});
+const alerts = new Alerts(document.querySelector('#alerts'), {
+  onRepair: payRepair,
+  onFocus: selectStage,
+});
+
+function payRepair(incident) {
+  if (sim.payRepair(incident)) render();
+}
 const charts = new Charts(document.querySelector('#charts'));
 
 // Selecting from the 3D world or closing the panel keeps both in sync
@@ -61,6 +77,12 @@ const hud = new Hud(document.querySelector('#hud'), {
 function tick() {
   sim.step();
   render();
+  // A factory breakdown needs a decision (pay or wait), so pause and show the factory
+  if (sim.newIncidents.some((i) => i.kind === 'factory')) {
+    loop.pause();
+    hud.setPlaying(false);
+    selectStage('factory');
+  }
   if (sim.isOver) {
     loop.pause();
     hud.setPlaying(false);
@@ -70,6 +92,7 @@ function tick() {
 
 function render() {
   hud.update(sim);
+  alerts.update(sim);
   panel.update(sim);
   charts.update(sim);
 }
@@ -86,7 +109,8 @@ function showSummary() {
     <p>Final cash: <strong>${euro.format(sim.cash)}</strong></p>
     <p>Service level: <strong>${Math.round(sim.serviceLevel * 100)}%</strong></p>
     <p>Transport costs: <strong>${euro.format(sim.totalTransport)}</strong> ·
-       Storage and shortage costs: <strong>${euro.format(storage)}</strong></p>
+       Storage and shortage costs: <strong>${euro.format(storage)}</strong> ·
+       Repairs: <strong>${euro.format(sim.repairCosts)}</strong></p>
     <p>Bullwhip ratio (order variance ÷ demand variance, 1.00 = orders as steady as demand):</p>
     <ul>${ratios}</ul>
     <p class="muted">Press Restart to play again.</p>`;

@@ -88,6 +88,12 @@ export class World3D {
     this.addRoads();
 
     this.truckTemplates = {}; // truck type -> model, filled once models load
+    this.coneTemplate = null;
+    this.roadworks = new THREE.Group(); // cones and barrier, rebuilt when roadworks change
+    this.roadworksKey = '';
+    this.scene.add(this.roadworks);
+    this.storm = false;
+    this.addRain();
     this.trucks = new Map();  // shipment object -> truck object
     this.currentSim = null;
 
@@ -104,8 +110,10 @@ export class World3D {
   }
 
   addLights() {
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a9a6a, 1.2));
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0x8a9a6a, 1.2);
+    this.scene.add(this.hemi);
     const sun = new THREE.DirectionalLight(0xffffff, 2);
+    this.sun = sun;
     sun.position.set(-7, 90, 40);
     sun.target.position.set(-37, 0, 4);
     sun.castShadow = true;
@@ -256,6 +264,11 @@ export class World3D {
       truck.position.y -= box.min.y;
       this.truckTemplates[type] = truck;
     }
+    const cone = models.cone;
+    fitModel(cone, 1.1);
+    this.coneTemplate = cone;
+    this.roadworksKey = ''; // rebuild roadworks with the cone model
+
     this.clearTrucks(); // existing box trucks get rebuilt with the models next frame
   }
 
@@ -297,9 +310,10 @@ export class World3D {
           truck = this.createTruck(shipment.truck);
           this.trucks.set(shipment, truck);
         }
-        // Before departAt the truck sits at the depot being loaded (t = 0)
-        const t = (now - shipment.departAt) / (shipment.driveEnd - shipment.departAt);
-        const d = THREE.MathUtils.clamp(t, 0, 1) * route.total;
+        // The simulation moves trucks in km once per in-game hour; between those steps the
+        // truck keeps going at its last speed so the movement looks smooth
+        const km = Math.min(stage.distance, shipment.km + (shipment.v ?? 0) * Math.max(0, now - sim.time));
+        const d = (km / stage.distance) * route.total;
         this.pointAlong(route, d, truck.position);
         this.pointAlong(route, d + 0.5, ahead);
         if (ahead.distanceToSquared(truck.position) > 1e-4) truck.lookAt(ahead);
@@ -312,6 +326,84 @@ export class World3D {
         this.trucks.delete(shipment);
       }
     }
+  }
+
+  // Cones and a striped barrier across the road where roadworks are blocking it
+  updateRoadworks(sim) {
+    const active = sim.activeIncidents.filter((i) => i.kind === 'roadworks');
+    const key = active.map((i) => i.id).join('|') + (this.coneTemplate ? 'm' : '');
+    if (key === this.roadworksKey) return;
+    this.roadworksKey = key;
+    this.roadworks.clear();
+
+    for (const works of active) {
+      const route = this.routes.get(works.target);
+      const at = works.at * route.total;
+      const pos = this.pointAlong(route, at + 1.5, new THREE.Vector3());
+      const ahead = this.pointAlong(route, at + 2.5, new THREE.Vector3());
+      const holder = new THREE.Group();
+      holder.position.copy(pos);
+      holder.lookAt(ahead.x, pos.y, ahead.z); // +Z along the road, X across it
+      for (const x of [-1, 0, 1]) {
+        const cone = this.coneTemplate
+          ? this.coneTemplate.clone()
+          : new THREE.Mesh(new THREE.ConeGeometry(0.35, 1, 12).translate(0, 0.5, 0),
+            new THREE.MeshStandardMaterial({ color: 0xef7d22 }));
+        cone.position.x = x * 0.9;
+        holder.add(cone);
+      }
+      const barrier = new THREE.Mesh(
+        new THREE.BoxGeometry(3, 0.35, 0.2),
+        new THREE.MeshStandardMaterial({ color: 0xe24b4a }),
+      );
+      barrier.position.set(0, 1.3, 0.8);
+      holder.add(barrier);
+      this.roadworks.add(holder);
+    }
+  }
+
+  // Falling rain, only shown during a storm
+  addRain() {
+    const count = 1500;
+    const positions = new Float32Array(count * 6);
+    for (let i = 0; i < count; i++) {
+      const x = (Math.random() - 0.5) * 220;
+      const y = Math.random() * 80;
+      const z = (Math.random() - 0.5) * 170;
+      positions.set([x, y, z, x - 0.4, y - 2.5, z], i * 6);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    this.rain = new THREE.LineSegments(geometry,
+      new THREE.LineBasicMaterial({ color: 0xaabbcc, transparent: true, opacity: 0.6 }));
+    this.rain.visible = false;
+    this.scene.add(this.rain);
+  }
+
+  // Storm: darker sky and light, fog and rain
+  updateWeather(sim, dt) {
+    const storm = sim.isStorm();
+    if (storm !== this.storm) {
+      this.storm = storm;
+      this.scene.background.setHex(storm ? 0x6f7d88 : 0xbfd9ea);
+      this.scene.fog = storm ? new THREE.Fog(0x6f7d88, 90, 260) : null;
+      this.hemi.intensity = storm ? 0.7 : 1.2;
+      this.sun.intensity = storm ? 0.6 : 2;
+      this.rain.visible = storm;
+    }
+    if (!storm) return;
+    // Keep the rain around where the camera is looking and let it fall
+    this.rain.position.x = this.controls.target.x;
+    this.rain.position.z = this.controls.target.z;
+    const pos = this.rain.geometry.attributes.position;
+    const fall = 70 * dt;
+    for (let i = 0; i < pos.count; i += 2) {
+      let y = pos.getY(i) - fall;
+      if (y < 0) y += 80;
+      pos.setY(i, y);
+      pos.setY(i + 1, y - 2.5);
+    }
+    pos.needsUpdate = true;
   }
 
   clearTrucks() {
@@ -427,6 +519,7 @@ export class World3D {
     const now = performance.now();
     const dt = Math.min((now - this.lastFrame) / 1000, 0.1);
     this.lastFrame = now;
+    this.frameDt = dt;
     this.moveCamera(dt);
     if (!this.focus) return;
     const a = 1 - Math.exp(-dt * 5); // smooth, frame-rate independent ease
@@ -440,7 +533,11 @@ export class World3D {
       const b = this.buildings.get(stage.id);
       if (!b) continue;
       const shortName = stage.type === 'shop' ? stage.name.replace(' Shop', '') : stage.name;
-      b.flame.visible = sim.isBroken(stage.id);
+      // 🔥 for damage or breakdowns, 😓 when the supplier's workers are overworked
+      const trouble = sim.activeIncidents.find((i) => i.target === stage.id
+        && ['supplier', 'overworked', 'factory'].includes(i.kind));
+      b.flame.visible = !!trouble;
+      if (trouble) b.flame.element.firstChild.textContent = trouble.kind === 'overworked' ? '😓' : '🔥';
       if (stage.infinite) {
         b.labelDiv.textContent = shortName;
         continue;
@@ -458,7 +555,9 @@ export class World3D {
   render(sim, progress) {
     this.syncTrucks(sim, progress);
     this.updateLabels(sim);
+    this.updateRoadworks(sim);
     this.updateCamera();
+    this.updateWeather(sim, this.frameDt ?? 0);
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);

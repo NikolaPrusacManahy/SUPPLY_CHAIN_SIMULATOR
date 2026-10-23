@@ -54,9 +54,6 @@ button.icon { padding: 0 8px; font-size: 20px; line-height: 28px; border-color: 
 .truck-option { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
 .truck-option.active { background: #e6f1fb; color: #0c447c; border-color: #378add; }
 .truck-option.active .muted { color: #185fa5; }
-.upgrade { display: flex; justify-content: space-between; align-items: center; gap: 8px;
-           border: 1px dashed #ccc; border-radius: 8px; padding: 8px 10px; }
-.upgrade.locked { opacity: 0.7; }
 .badge { background: #eee; border-radius: 6px; padding: 2px 8px; font-size: 12px; white-space: nowrap; }
 
 /* Reports drawer along the bottom of the game screen */
@@ -80,7 +77,7 @@ button.icon { padding: 0 8px; font-size: 20px; line-height: 28px; border-color: 
                  font-size: 12px; color: #555; }
 
 /* Incidents */
-.incident-flame { font-size: 40px; pointer-events: none; }
+.incident-flame { font-size: 40px; pointer-events: none; padding-bottom: 70px; } /* sits above the name label */
 .incident-flame span { display: inline-block; animation: flame-blink 0.9s ease-in-out infinite; }
 @keyframes flame-blink {
   0%, 100% { opacity: 1; transform: scale(1); }
@@ -112,3 +109,33 @@ button.icon { padding: 0 8px; font-size: 20px; line-height: 28px; border-color: 
   15% { opacity: 1; }
   100% { opacity: 0; transform: translateY(-40px); }
 }
+
+/* Supplier workload meter */
+.meter { height: 10px; background: #eee; border-radius: 5px; overflow: hidden; }
+.meter span { display: block; height: 100%; width: 0; background: #1d9e75; transition: width 0.3s; }
+.meter span.high { background: #e24b4a; }
+
+/* Upgrades */
+.upgrade { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+           border: 1px solid #ddd; border-radius: 8px; padding: 8px 10px; }
+.upgrade button { white-space: nowrap; }
+.upgrade button:disabled { opacity: 0.5; cursor: not-allowed; }
+.badge.owned { background: #eaf3de; color: #27500a; }
+
+/* Alerts: debt warning */
+.alert.danger { border-color: #a32d2d; border-left-color: #a32d2d; background: #fcebeb; }
+
+/* Results screen */
+#message h2 { text-align: center; }
+.stars { text-align: center; font-size: 44px; letter-spacing: 6px; color: #d3d1c7; line-height: 1; }
+.stars .on { color: #ef9f27; }
+.result-main { display: flex; justify-content: space-around; text-align: center; }
+.result-main div { display: flex; flex-direction: column; }
+.result-main strong { font-size: 26px; }
+.breakdown { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; font-size: 14px;
+             border-top: 1px solid #eee; padding-top: 8px; }
+.breakdown dd { text-align: right; font-variant-numeric: tabular-nums; }
+.breakdown dd.plus { color: #3b6d11; }
+.tip { background: #e6f1fb; color: #0c447c; border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+.goals { font-size: 12px; text-align: center; }
+#message button { align-self: center; padding: 8px 20px; }

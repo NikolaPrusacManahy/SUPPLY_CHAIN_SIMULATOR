@@ -21,6 +21,7 @@ export const MODEL_FILES = {
   van: 'cars/van.glb',
   box: 'cars/delivery.glb',
   lorry: 'cars/delivery-flat.glb',
+  cone: 'cars/cone.glb',
 };
 
 // Loads every model in parallel. Resolves to { key: THREE.Object3D }.

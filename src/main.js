@@ -1,5 +1,5 @@
 import './style.css';
-import { Simulation } from './sim/simulation.js';
+import { Simulation, STAR_GOALS } from './sim/simulation.js';
 import { bullwhipRatio } from './sim/stats.js';
 import { GameLoop } from './game/game-loop.js';
 import { Hud } from './ui/hud.js';
@@ -26,6 +26,7 @@ const world = new World3D(document.querySelector('#world'), { onSelect: selectSt
 const panel = new BuildingPanel(document.querySelector('#panel'), {
   onClose: () => selectStage(null),
   onRepair: payRepair,
+  onBuy: buyUpgrade,
 });
 const alerts = new Alerts(document.querySelector('#alerts'), {
   onRepair: payRepair,
@@ -34,6 +35,12 @@ const alerts = new Alerts(document.querySelector('#alerts'), {
 
 function payRepair(incident) {
   if (sim.payRepair(incident)) render();
+}
+
+function buyUpgrade(stage, key) {
+  if (!sim.buyUpgrade(stage, key)) return;
+  panel.show(stage, sim); // redraw: truck times and costs may have changed
+  render();
 }
 const charts = new Charts(document.querySelector('#charts'));
 
@@ -107,23 +114,54 @@ function render() {
   charts.update(sim);
 }
 
+// One piece of advice, based on what went worst
+function resultTip(costs) {
+  const overworked = sim.incidents.filter((i) => i.kind === 'overworked').length;
+  if (sim.bankrupt) return 'Cash stayed below €0 for 3 days. Keep an eye on transport, repairs and upgrades early in the game, before the shops are selling.';
+  if (overworked > 0) return `The supplier's workers needed days off ${overworked} time${overworked > 1 ? 's' : ''}. Steadier, smaller orders from the factory keep their workload down.`;
+  if (sim.serviceLevel < STAR_GOALS.three.service) return `Shops could only serve ${Math.round(sim.serviceLevel * 100)}% of their customers. Order earlier, and switch truck types when one is out of service.`;
+  if (costs.transport > costs.storage) return 'Transport was your biggest cost. Fuller trucks (Auto: full trucks) cut the cost per unit.';
+  return 'Storage was your biggest cost. Too much stock was sitting in buildings: lower the orders or buy bigger storage.';
+}
+
+// End screen: stars, money breakdown and a tip
 function showSummary() {
-  const storage = sim.stages.reduce((sum, s) => sum + s.totalCost, 0);
-  const ratios = sim.stages
-    .filter((s) => !s.infinite)
-    .map((s) => `<li>${s.name}: <strong>${bullwhipRatio(sim.history, s).toFixed(2)}</strong></li>`)
-    .join('');
+  const raw = sim.history.reduce((sum, h) => sum + h.supplier.shipped, 0) * sim.rawCost;
+  const costs = {
+    sales: sim.totalSold * sim.salePrice,
+    raw,
+    transport: sim.totalTransport,
+    storage: sim.stages.reduce((sum, s) => sum + s.totalCost, 0),
+    repairs: sim.repairCosts,
+    upgrades: sim.upgradeCosts,
+  };
+  const stars = [1, 2, 3].map((n) => `<span class="${n <= sim.stars ? 'on' : ''}">★</span>`).join('');
+  const row = (label, value, plus = false) =>
+    `<dt>${label}</dt><dd class="${plus ? 'plus' : ''}">${plus ? '+' : '−'}${euro.format(value)}</dd>`;
+  const ratios = sim.stages.filter((s) => !s.infinite)
+    .map((s) => `${s.name} ${bullwhipRatio(sim.history, s).toFixed(1)}`).join(' · ');
 
   messageEl.innerHTML = `
-    <h2>Game over after ${sim.maxDays} days</h2>
-    <p>Final cash: <strong>${euro.format(sim.cash)}</strong></p>
-    <p>Service level: <strong>${Math.round(sim.serviceLevel * 100)}%</strong></p>
-    <p>Transport costs: <strong>${euro.format(sim.totalTransport)}</strong> ·
-       Storage and shortage costs: <strong>${euro.format(storage)}</strong> ·
-       Repairs: <strong>${euro.format(sim.repairCosts)}</strong></p>
-    <p>Bullwhip ratio (order variance ÷ demand variance, 1.00 = orders as steady as demand):</p>
-    <ul>${ratios}</ul>
-    <p class="muted">Press Restart to play again.</p>`;
+    <h2>${sim.bankrupt ? `Bankrupt on day ${sim.day}` : `Day ${sim.maxDays}: results`}</h2>
+    <div class="stars">${stars}</div>
+    <div class="result-main">
+      <div><span class="muted">Profit</span><strong class="${sim.profit < 0 ? 'negative' : ''}">${euro.format(sim.profit)}</strong></div>
+      <div><span class="muted">Service</span><strong>${Math.round(sim.serviceLevel * 100)}%</strong></div>
+    </div>
+    <dl class="breakdown">
+      ${row('Sales', costs.sales, true)}
+      ${row('Raw material', costs.raw)}
+      ${row('Transport', costs.transport)}
+      ${row('Storage and lost sales', costs.storage)}
+      ${row('Repairs', costs.repairs)}
+      ${row('Upgrades', costs.upgrades)}
+    </dl>
+    <p class="tip">${resultTip(costs)}</p>
+    <p class="muted goals">★ survive 60 days · ★★ €${STAR_GOALS.two.profit.toLocaleString('en-IE')} profit ·
+      ★★★ €${STAR_GOALS.three.profit.toLocaleString('en-IE')} profit and ${STAR_GOALS.three.service * 100}% service</p>
+    <p class="muted goals">Bullwhip ratio (1.0 = orders as steady as demand): ${ratios}</p>
+    <button data-again>Play again</button>`;
+  messageEl.querySelector('[data-again]').addEventListener('click', restart);
 }
 
 function restart() {

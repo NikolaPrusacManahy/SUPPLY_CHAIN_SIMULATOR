@@ -15,7 +15,8 @@ export function tripTimes(distanceKm, truckId) {
 
 // Whole days from sending goods to having them in stock
 // (a truck that arrives during a day is unloaded at the start of the next one)
-export function travelDays(distanceKm, truckId) {
+// loadFactor < 1 when the sending building has a loading dock
+export function travelDays(distanceKm, truckId, loadFactor = 1) {
   const { load, drive } = tripTimes(distanceKm, truckId);
-  return Math.max(1, Math.ceil(load + drive));
+  return Math.max(1, Math.ceil(load * loadFactor + drive));
 }

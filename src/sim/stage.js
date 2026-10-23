@@ -1,6 +1,10 @@
 import { TRUCK_TYPES, travelDays } from './trucks.js';
 
-const SHOP_START_DAYS = 3; // shops open with about 3 days of stock
+const SHOP_START_DAYS = 7.5; // shops open with about a week of stock
+const STORAGE = { factory: 300, warehouse: 300, shop: 100 }; // units before overflow costs apply
+const OVERFLOW_COST = 1; // per unit per day above the storage limit (10x normal)
+const SUPPLIER_CAPACITY = 60;     // units a day
+const SUPPLIER_WORK_LIMIT = 260;  // units shipped in 5 days before the workers need days off
 const OUTLIER_LIMIT = 3;   // forecasts ignore anything above 3x the normal daily demand
 
 // One building in the network: supplier, factory, warehouse or shop.
@@ -13,8 +17,9 @@ export class Stage {
     this.lostSales = type === 'shop';    // customers leave; businesses wait (backlog)
     this.shortageCost = this.lostSales ? 3 : 1;
     this.demandMean = demand;            // customer demand (shops only)
-    this.dailyCapacity = this.infinite ? 60 : Infinity; // supplier: most it can ship per day
     this.broken = false;                 // set each day by the simulation (supplier/factory incidents)
+    this.upgrades = {};                  // upgrade key -> true once bought
+    this.recentShipped = [];             // supplier: units shipped on each of the last 5 days
 
     this.upstream = null;
     this.downstreams = [];
@@ -23,7 +28,7 @@ export class Stage {
     this.stock = 0;
     this.manualQty = 20;
 
-    this.inTransit = [];   // trucks heading here: { qty, truck, sentOn, departAt, driveEnd }
+    this.inTransit = [];   // trucks heading here: { qty, truck, sentOn, departAt, km, arrivedAt }
     this.waiting = 0;      // units ready to send here but stuck at the depot (truck type out of service)
     this.processing = [];  // factory only: { qty, readyAt }
     this.onOrder = 0;      // ordered upstream, not in stock yet
@@ -49,13 +54,45 @@ export class Stage {
     this.stock = this.type === 'shop' ? Math.round(expectedDemand * SHOP_START_DAYS) : 0;
   }
 
+  // Supplier: most it can ship per day (More workers upgrade: +50%)
+  get dailyCapacity() {
+    if (!this.infinite) return Infinity;
+    return SUPPLIER_CAPACITY * (this.upgrades.workers ? 1.5 : 1);
+  }
+
+  // Supplier: units it can ship in 5 days before the workers need days off
+  get workLimit() {
+    return SUPPLIER_WORK_LIMIT * (this.upgrades.workers ? 1.5 : 1);
+  }
+
+  get workload() {
+    return this.recentShipped.reduce((a, b) => a + b, 0);
+  }
+
+  // Storage space before the expensive overflow cost applies (Bigger storage: x2)
+  get storageLimit() {
+    const base = STORAGE[this.type] ?? Infinity;
+    return base * (this.upgrades.storage ? 2 : 1);
+  }
+
+  // Loading dock: trucks leaving this building load 4x faster and trips cost 25% less
+  get loadFactor() {
+    return this.upgrades.dock ? 0.25 : 1;
+  }
+
+  get tripCostFactor() {
+    return this.upgrades.dock ? 0.75 : 1;
+  }
+
   get truckType() {
     return TRUCK_TYPES[this.truck];
   }
 
   // Days from placing an order to having the goods in stock
   get leadTime() {
-    return this.upstream ? travelDays(this.distance, this.truck) + this.processingDays : 0;
+    return this.upstream
+      ? travelDays(this.distance, this.truck, this.upstream.loadFactor) + this.processingDays
+      : 0;
   }
 
   targetFor(demand) {
@@ -81,16 +118,16 @@ export class Stage {
     return this.inTransit.reduce((sum, s) => sum + s.qty, 0);
   }
 
-  // Unloads every truck that has reached this building by `time` (in days, can be mid-day)
-  // and finishes production that is ready. Returns what happened, for pop-ups.
+  // Unloads every truck that has reached this building (the simulation moves the trucks
+  // and sets arrivedAt) and finishes production that is ready. Returns events for pop-ups.
   receive(time) {
     const events = [];
-    const arrived = this.inTransit.filter((s) => s.driveEnd <= time);
-    this.inTransit = this.inTransit.filter((s) => s.driveEnd > time);
+    const arrived = this.inTransit.filter((s) => s.arrivedAt !== null && s.arrivedAt <= time);
+    this.inTransit = this.inTransit.filter((s) => !arrived.includes(s));
     for (const s of arrived) {
       if (this.processingDays > 0) {
         // Raw material: production starts when the truck arrives
-        this.processing.push({ qty: s.qty, readyAt: s.driveEnd + this.processingDays });
+        this.processing.push({ qty: s.qty, readyAt: s.arrivedAt + this.processingDays });
         events.push({ stageId: this.id, kind: 'raw', qty: s.qty });
       } else {
         this.stock += s.qty;
@@ -141,6 +178,10 @@ export class Stage {
     for (const p of plan) this.owed.set(p.to.id, p.owed - p.qty);
     if (!this.infinite) this.stock -= available;
     this.lastShipped = available;
+    if (this.infinite) {
+      this.recentShipped.push(available);
+      if (this.recentShipped.length > 5) this.recentShipped.shift();
+    }
     return plan.filter((p) => p.qty > 0);
   }
 
@@ -173,7 +214,9 @@ export class Stage {
   addDailyCost() {
     if (this.infinite) return 0;
     const shortage = this.lostSales ? this.lastLost : this.backlog;
-    const cost = this.stock * this.holdingCost + shortage * this.shortageCost;
+    const normal = Math.min(this.stock, this.storageLimit);
+    const overflow = this.stock - normal;
+    const cost = normal * this.holdingCost + overflow * OVERFLOW_COST + shortage * this.shortageCost;
     this.totalCost += cost;
     return cost;
   }

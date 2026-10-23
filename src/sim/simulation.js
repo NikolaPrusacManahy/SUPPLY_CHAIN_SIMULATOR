@@ -2,15 +2,19 @@ import { createRng } from './random.js';
 import { generateEvents } from './events.js';
 import { Stage } from './stage.js';
 import { NODES, KM_PER_UNIT, routeLength } from './network.js';
+import { TRUCK_TYPES } from './trucks.js';
+import { generateIncidents, FACTORY_REPAIR, SUPPLIER_DAYS_OFF, STORM_SPEED } from './incidents.js';
+import { UPGRADES, UPGRADE_COST } from './upgrades.js';
 
-const TRUCK_SPACING_KM = 13.5; // gap between trucks of one convoy as they leave the depot
-import { tripTimes } from './trucks.js';
-import { generateIncidents, FACTORY_REPAIR } from './incidents.js';
+const TRUCK_SPACING_KM = 13.5; // gap between trucks of one convoy (leaving the depot or queuing)
+const BANKRUPT_DAYS = 3;       // days in a row below €0 before the company goes bust
+const STEPS_PER_DAY = 24;      // trucks move in fixed one-hour steps, whatever the frame rate
+export const STAR_GOALS = { two: { profit: 5000 }, three: { profit: 10000, service: 0.8 } };
 
 export class Simulation {
   constructor({ nodes = NODES, seed = 1, startCash = 12000, salePrice = 30, rawCost = 8,
                 demandSpread = 0.4, maxDays = 60 } = {}) {
-    Object.assign(this, { seed, salePrice, rawCost, demandSpread, maxDays });
+    Object.assign(this, { seed, startCash, salePrice, rawCost, demandSpread, maxDays });
 
     this.stages = nodes.map((n) => new Stage({
       ...n,
@@ -31,17 +35,21 @@ export class Simulation {
     const depth = (s) => (s.upstream ? depth(s.upstream) + 1 : 0);
     this.processOrder = [...this.stages].sort((a, b) => depth(b) - depth(a));
 
-    const expected = (s) => (s.type === 'shop' ? s.demandMean
-      : s.downstreams.reduce((sum, d) => sum + expected(d), 0));
-    for (const s of this.stages) s.init(expected(s));
+    for (const s of this.stages) s.init(this.expectedDemand(s));
 
     this.rng = createRng(seed);
     this.events = generateEvents(this.rng, maxDays);
     // Separate random stream, so incidents never change the customer demand of a seed
-    this.incidents = generateIncidents(createRng(seed ^ 0x5bd1e995), maxDays);
+    const routes = this.stages.filter((s) => s.upstream).map((s) => s.id);
+    this.incidents = generateIncidents(createRng(seed ^ 0x5bd1e995), maxDays, routes);
+    this.nextIncidentId = this.incidents.length;
     this.repairCosts = 0;
+    this.upgradeCosts = 0;
+    this.daysInDebt = 0;
+    this.bankrupt = false;
     this.deliveryLog = []; // deliveries/production since the UI last asked, for pop-ups
-    this.time = 0;         // current time in days, including the fraction of the day
+    this.hour = 0;         // hours simulated so far (whole number, so the simulation never drifts)
+    this.time = 0;         // the same in days: hour / 24
     this.day = 0;
     this.cash = startCash;
     this.lastDemand = 0;
@@ -56,12 +64,41 @@ export class Simulation {
     return this.byId.get(id);
   }
 
+  // Normal daily demand a building serves: its own customers, or the sum of the shops below it
+  expectedDemand(s) {
+    if (s.type === 'shop') return s.demandMean * (s.upgrades.expansion ? 1.25 : 1);
+    return s.downstreams.reduce((sum, d) => sum + this.expectedDemand(d), 0);
+  }
+
+  get profit() {
+    return this.cash - this.startCash;
+  }
+
+  // 0 stars if bankrupt; 1 for surviving; 2 for €5k profit; 3 for €10k profit and 80% service
+  get stars() {
+    if (this.bankrupt) return 0;
+    if (this.profit >= STAR_GOALS.three.profit && this.serviceLevel >= STAR_GOALS.three.service) return 3;
+    if (this.profit >= STAR_GOALS.two.profit) return 2;
+    return 1;
+  }
+
+  buyUpgrade(stage, key) {
+    const upgrade = UPGRADES[key];
+    if (!upgrade || !upgrade.for.includes(stage.type) || stage.upgrades[key] || this.cash < UPGRADE_COST) return false;
+    stage.upgrades[key] = true;
+    this.cash -= UPGRADE_COST;
+    this.upgradeCosts += UPGRADE_COST;
+    // More customers: the shop and everything above it now expect more demand
+    if (key === 'expansion') for (const s of this.stages) s.expectedDemand = this.expectedDemand(s);
+    return true;
+  }
+
   get serviceLevel() {
     return this.totalDemand ? this.totalSold / this.totalDemand : 1;
   }
 
   get isOver() {
-    return this.day >= this.maxDays;
+    return this.bankrupt || this.day >= this.maxDays;
   }
 
   eventOn(day) {
@@ -86,7 +123,16 @@ export class Simulation {
   }
 
   isBroken(stageId, day = this.day) {
-    return this.incidentsOn(day).some((i) => i.kind !== 'trucks' && i.target === stageId);
+    return this.incidentsOn(day).some((i) => ['supplier', 'overworked', 'factory'].includes(i.kind) && i.target === stageId);
+  }
+
+  isStorm(day = this.day) {
+    return this.incidentsOn(day).some((i) => i.kind === 'storm');
+  }
+
+  // Roadworks blocking the road to this stage on this day (or null)
+  roadworksOn(stageId, day = this.day) {
+    return this.incidentsOn(day).find((i) => i.kind === 'roadworks' && i.target === stageId) ?? null;
   }
 
   truckAvailable(truckId, day = this.day) {
@@ -104,7 +150,7 @@ export class Simulation {
   }
 
   customerDemand(shop, day) {
-    const multiplier = this.eventOn(day)?.multiplier ?? 1;
+    const multiplier = (this.eventOn(day)?.multiplier ?? 1) * (shop.upgrades.expansion ? 1.25 : 1);
     const offset = (this.rng() * 2 - 1) * this.demandSpread * shop.demandMean;
     return Math.max(0, Math.round(shop.demandMean * multiplier + offset));
   }
@@ -117,7 +163,7 @@ export class Simulation {
       return 0;
     }
     const truck = to.truckType;
-    const { load, drive } = tripTimes(to.distance, to.truck);
+    const load = truck.loadDays * to.upstream.loadFactor;
     // One loading bay: each truck of a convoy leaves a little after the one before
     const spacing = TRUCK_SPACING_KM / truck.speed;
     let left = qty;
@@ -125,10 +171,10 @@ export class Simulation {
     for (let i = 0; left > 0; i++) {
       const units = Math.min(truck.capacity, left);
       left -= units;
-      const departAt = day + load + i * spacing; // loaded, then leaves
-      const driveEnd = departAt + drive;          // reaches the destination; goods are added then
-      to.inTransit.push({ qty: units, truck: truck.id, sentOn: day, departAt, driveEnd });
-      cost += truck.tripCost;
+      // km = distance driven so far; arrivedAt is set when it reaches the building
+      to.inTransit.push({ qty: units, truck: truck.id, sentOn: day,
+                          departAt: day + load + i * spacing, km: 0, arrivedAt: null });
+      cost += truck.tripCost * to.upstream.tripCostFactor;
     }
     to.transportCost += cost;
     return cost;
@@ -136,9 +182,72 @@ export class Simulation {
 
   // Called every frame with the current time (day + fraction): unloads trucks the
   // moment they arrive, so stock changes when a truck reaches a building, not at the next day
+  //
+  // Fixed timestep: trucks always move in exact one-hour steps, so the result never depends
+  // on how many frames the computer draws. The 3D view smooths the movement between steps.
   advanceTo(time) {
-    this.time = Math.max(this.time, time);
-    for (const s of this.stages) this.deliveryLog.push(...s.receive(this.time));
+    const targetHour = Math.floor(time * STEPS_PER_DAY + 1e-9);
+    while (this.hour < targetHour) {
+      const t0 = this.hour / STEPS_PER_DAY;
+      const t1 = (this.hour + 1) / STEPS_PER_DAY;
+      this.moveTrucks(t0, t1, Math.floor(this.hour / STEPS_PER_DAY));
+      this.hour++;
+      this.time = this.hour / STEPS_PER_DAY;
+      for (const s of this.stages) this.deliveryLog.push(...s.receive(this.time));
+    }
+  }
+
+  // Drives every truck from time t0 to t1. Storms halve the speed; trucks that have not
+  // passed a roadworks yet stop at it and queue behind each other.
+  moveTrucks(t0, t1, day) {
+    const stormFactor = this.isStorm(day) ? STORM_SPEED : 1;
+    for (const stage of this.stages) {
+      if (!stage.inTransit.length) continue;
+      const works = this.roadworksOn(stage.id, day);
+      const blockKm = works ? works.at * stage.distance : Infinity;
+      let queueEnd = blockKm + TRUCK_SPACING_KM; // the first truck can drive up to the works
+      // Leading trucks first, so the ones behind queue up behind them
+      const trucks = [...stage.inTransit].sort((a, b) => b.km - a.km);
+      for (const s of trucks) {
+        if (s.arrivedAt !== null) continue;
+        s.v = 0; // speed used by the 3D view to smooth movement; 0 while loading or stopped
+        const start = Math.max(t0, s.departAt);
+        if (start >= t1) continue; // still loading at the depot
+        const speed = TRUCK_TYPES[s.truck].speed * stormFactor;
+        let km = s.km + speed * (t1 - start);
+        let stopped = false;
+        if (s.km <= blockKm) {
+          const stopAt = Math.max(s.km, queueEnd - TRUCK_SPACING_KM);
+          if (km > stopAt) { km = stopAt; stopped = true; }
+          queueEnd = km;
+        }
+        if (!stopped) s.v = speed;
+        if (km >= stage.distance) {
+          s.arrivedAt = start + (stage.distance - s.km) / speed;
+          km = stage.distance;
+        }
+        s.km = km;
+      }
+    }
+  }
+
+  // Rough day a truck will arrive, for the building panel
+  eta(stage, s) {
+    const start = Math.max(this.time, s.departAt);
+    const speed = TRUCK_TYPES[s.truck].speed * (this.isStorm() ? STORM_SPEED : 1);
+    let at = start + (stage.distance - s.km) / speed;
+    const works = this.roadworksOn(stage.id);
+    if (works && s.km <= works.at * stage.distance) at += works.endDay + 1 - this.time;
+    return Math.floor(at);
+  }
+
+  // Supplier: shipping too much in a short time means the workers need days off
+  checkSupplierWorkload(day) {
+    const sup = this.supplier;
+    if (sup.workload <= sup.workLimit || this.isBroken(sup.id, day + 1)) return;
+    this.incidents.push({ id: this.nextIncidentId++, kind: 'overworked', target: sup.id,
+                          startDay: day + 1, endDay: day + SUPPLIER_DAYS_OFF });
+    sup.recentShipped = [];
   }
 
   // Units being loaded onto trucks that have not left yet
@@ -195,10 +304,16 @@ export class Simulation {
       if (s.upstream) s.placeOrder(s.orderQty());
     }
 
+    this.checkSupplierWorkload(day);
+
     let holding = 0;
     for (const s of this.stages) holding += s.addDailyCost();
     const purchases = this.supplier.lastShipped * this.rawCost;
     this.cash += sold * this.salePrice - purchases - holding - transport;
+
+    // Bankruptcy: cash below zero for several days in a row ends the game
+    this.daysInDebt = this.cash < 0 ? this.daysInDebt + 1 : 0;
+    if (this.daysInDebt >= BANKRUPT_DAYS) this.bankrupt = true;
 
     this.lastDemand = demand;
     this.lastTransport = transport;

@@ -1,4 +1,4 @@
-# Supply Chain Simulator
+git add Doc_sessions# Supply Chain Simulator
 
 A 3D logistics management game built for the Game Development module.
 This README is the **Game Design Document (GDD)** and describes the game as it is built.

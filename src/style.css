@@ -6,11 +6,11 @@ html, body { height: 100%; overflow: hidden; }
 
 #hud { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
        gap: 12px; background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 10px 16px; }
-.hud-stats { display: flex; gap: 20px; flex-wrap: wrap; align-items: center; }
+.hud-stats { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; flex: 1; min-width: 0; }
 .hud-controls { display: flex; gap: 6px; flex-wrap: wrap; }
 .negative { color: #c0392b; }
 .muted { color: #888; }
-.event { background: #faeeda; color: #633806; padding: 2px 10px; border-radius: 6px; }
+.event { background: #faeeda; color: #633806; padding: 2px 10px; border-radius: 6px; white-space: nowrap; }
 .event:empty { display: none; }
 
 button { font: inherit; padding: 6px 12px; border: 1px solid #bbb; border-radius: 6px;
@@ -20,7 +20,7 @@ button.active { background: #222; color: #fff; border-color: #222; }
 
 /* 3D world with the building panel on top of its right side */
 #stage { position: relative; flex: 1; min-height: 0; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
-#world { position: absolute; inset: 0; }
+#world { position: absolute; inset: 0; z-index: 0; } /* own layer, so the label z-indexes stay below panels and pop-ups */
 #world canvas { display: block; }
 .label-layer { position: absolute; top: 0; left: 0; pointer-events: none; }
 .world-label { background: rgba(255, 255, 255, 0.92); padding: 2px 8px; border-radius: 6px;
@@ -139,3 +139,40 @@ button.icon { padding: 0 8px; font-size: 20px; line-height: 28px; border-color: 
 .tip { background: #e6f1fb; color: #0c447c; border-radius: 8px; padding: 8px 10px; font-size: 14px; }
 .goals { font-size: 12px; text-align: center; }
 #message button { align-self: center; padding: 8px 20px; }
+
+/* Pause banner */
+#pause-banner { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 3;
+                display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100% - 720px));
+                min-width: 260px; background: #222; color: #fff; border-radius: 8px; padding: 6px 8px 6px 14px;
+                font-size: 14px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); }
+#pause-banner span { flex: 1; }
+#pause-banner button { padding: 3px 12px; background: #fff; color: #222; border-color: #fff; white-space: nowrap; }
+
+/* Start screen */
+#start { position: absolute; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center;
+         background: rgba(34, 34, 34, 0.45); padding: 16px; overflow-y: auto; }
+.start-card { width: min(620px, 100%); background: #fff; border-radius: 12px; padding: 24px;
+              display: flex; flex-direction: column; gap: 14px; font-size: 14px; margin: auto; }
+.start-card h1 { font-size: 28px; text-align: center; }
+.tagline { text-align: center; color: #555; }
+.start-goal { background: #f7f7f5; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.start-stars { color: #854f0b; font-weight: 600; }
+.start-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.start-cols ul { margin: 6px 0 0 18px; display: flex; flex-direction: column; gap: 3px; }
+.start-option { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.start-buttons { display: flex; justify-content: center; gap: 10px; }
+.start-buttons button { padding: 9px 22px; }
+button.primary { background: #222; color: #fff; border-color: #222; }
+button.primary:hover { background: #444; }
+@media (max-width: 560px) { .start-cols { grid-template-columns: 1fr; } }
+
+/* Tutorial card */
+#tutorial { position: absolute; left: 50%; bottom: 48px; transform: translateX(-50%); z-index: 5;
+            width: min(440px, calc(100% - 24px)); }
+#stage:has(#panel:not([hidden])) #tutorial { left: calc(50% - 176px); }
+.tutorial-card { background: #fff; border: 2px solid #378add; border-radius: 12px; padding: 14px 16px;
+                 display: flex; flex-direction: column; gap: 6px; font-size: 14px;
+                 box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); }
+.tutorial-card strong { font-size: 16px; }
+.tutorial-buttons { display: flex; gap: 6px; margin-top: 4px; }
+.tutorial-buttons span { flex: 1; }

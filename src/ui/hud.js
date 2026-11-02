@@ -3,7 +3,7 @@ const euro = new Intl.NumberFormat('en-IE', {
 });
 
 export class Hud {
-  constructor(root, { onPlayPause, onSpeed, onRestart, onReports }) {
+  constructor(root, { onPlayPause, onSpeed, onRestart, onReports, onAutoPause }) {
     root.innerHTML = `
       <div class="hud-stats">
         <span>Day <strong data-day>0</strong> / <span data-max></span></span>
@@ -18,6 +18,7 @@ export class Hud {
         <button data-speed="2">2x</button>
         <button data-speed="4">4x</button>
         <button data-speed="10">10x</button>
+        <button data-autopause title="Pause the game when something goes wrong">Auto-pause</button>
         <button data-reports>Reports</button>
         <button data-restart>Restart</button>
       </div>`;
@@ -37,6 +38,12 @@ export class Hud {
       this.reportsBtn.classList.toggle('active', onReports());
     });
 
+    this.autoPauseBtn = root.querySelector('[data-autopause]');
+    this.autoPauseBtn.addEventListener('click', () => {
+      this.setAutoPause(!this.autoPauseBtn.classList.contains('active'));
+      onAutoPause(this.autoPauseBtn.classList.contains('active'));
+    });
+
     const speedBtns = root.querySelectorAll('[data-speed]');
     speedBtns.forEach((btn) =>
       btn.addEventListener('click', () => {
@@ -50,6 +57,10 @@ export class Hud {
     this.playBtn.textContent = playing ? 'Pause' : 'Play';
   }
 
+  setAutoPause(on) {
+    this.autoPauseBtn.classList.toggle('active', on);
+  }
+
   update(sim) {
     this.dayEl.textContent = sim.day;
     this.maxEl.textContent = sim.maxDays;
@@ -59,8 +70,9 @@ export class Hud {
     this.seedEl.textContent = sim.seed;
 
     const ev = sim.currentEvent;
+    this.eventEl.title = ev ? `Customer demand ×${ev.multiplier}` : '';
     this.eventEl.textContent = ev
-      ? `${ev.name}: demand ×${ev.multiplier} until day ${ev.endDay}`
+      ? `${ev.name} ×${ev.multiplier} until day ${ev.endDay}`
       : '';
   }
 }

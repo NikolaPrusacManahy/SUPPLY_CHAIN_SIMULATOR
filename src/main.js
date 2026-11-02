@@ -1,5 +1,5 @@
 import './style.css';
-import { Simulation, STAR_GOALS } from './sim/simulation.js';
+import { Simulation, STAR_GOALS, BANKRUPT_DAYS } from './sim/simulation.js';
 import { bullwhipRatio } from './sim/stats.js';
 import { GameLoop } from './game/game-loop.js';
 import { Hud } from './ui/hud.js';
@@ -7,6 +7,9 @@ import { BuildingPanel } from './ui/building-panel.js';
 import { Charts } from './ui/charts.js';
 import { World3D } from './render/world3d.js';
 import { Alerts } from './ui/alerts.js';
+import { StartScreen } from './ui/start-screen.js';
+import { Tutorial } from './ui/tutorial.js';
+import { describeIncident, FACTORY_REPAIR } from './sim/incidents.js';
 
 const euro = new Intl.NumberFormat('en-IE', {
   style: 'currency', currency: 'EUR', maximumFractionDigits: 0,
@@ -19,8 +22,10 @@ const createSimulation = () => new Simulation({
 });
 
 const messageEl = document.querySelector('#message');
+const pauseBanner = document.querySelector('#pause-banner');
 let sim = createSimulation();
 let selectedId = null;
+let autoPause = true; // pause when a new problem starts or cash drops below €0
 
 const world = new World3D(document.querySelector('#world'), { onSelect: selectStage });
 const panel = new BuildingPanel(document.querySelector('#panel'), {
@@ -57,7 +62,15 @@ window.addEventListener('keydown', (e) => {
     selectStage(null);
     world.resetView();
   }
+  // Space pauses and resumes, except while typing a number in the panel
+  if (e.code === 'Space' && !e.target.closest?.('input, select, textarea')) {
+    e.preventDefault();
+    if (!e.repeat) togglePlay();
+  }
 });
+
+// A clicked button keeps keyboard focus, and Space would click it again: drop the focus instead
+document.addEventListener('click', (e) => e.target.closest?.('button')?.blur());
 
 const loop = new GameLoop({
   onTick: tick,
@@ -74,13 +87,36 @@ const loop = new GameLoop({
   },
 });
 
+// --- Pausing -------------------------------------------------------------
+function play() {
+  if (sim.isOver || startScreen.open) return;
+  if (tutorial.open) tutorial.close({ fromPlay: true });
+  loop.play();
+  hud.setPlaying(true);
+  pauseBanner.hidden = true;
+}
+
+// Pauses the game and says why in a banner at the top of the screen
+function pauseGame(reason = 'Paused') {
+  loop.pause();
+  hud.setPlaying(false);
+  if (sim.isOver) {
+    pauseBanner.hidden = true;
+    return;
+  }
+  pauseBanner.innerHTML = `<span>⏸ ${reason}</span><button data-continue>Continue (Space)</button>`;
+  pauseBanner.querySelector('[data-continue]').addEventListener('click', play);
+  pauseBanner.hidden = false;
+}
+
+function togglePlay() {
+  if (loop.running) pauseGame();
+  else play();
+}
+
 const hud = new Hud(document.querySelector('#hud'), {
-  onPlayPause: () => {
-    if (sim.isOver) return;
-    if (loop.running) loop.pause();
-    else loop.play();
-    hud.setPlaying(loop.running);
-  },
+  onPlayPause: togglePlay,
+  onAutoPause: (on) => { autoPause = on; },
   onSpeed: (speed) => loop.setSpeed(speed),
   onRestart: restart,
   onReports: () => {
@@ -94,17 +130,28 @@ const hud = new Hud(document.querySelector('#hud'), {
 function tick() {
   sim.step();
   render();
-  // A factory breakdown needs a decision (pay or wait), so pause and show the factory
-  if (sim.newIncidents.some((i) => i.kind === 'factory')) {
-    loop.pause();
-    hud.setPlaying(false);
-    selectStage('factory');
-  }
   if (sim.isOver) {
-    loop.pause();
-    hud.setPlaying(false);
+    pauseGame();
     showSummary();
+    return;
   }
+  checkAutoPause();
+}
+
+// A factory breakdown always pauses, because it needs a decision (pay or wait).
+// Other new problems and the first day in debt pause only when auto-pause is on.
+function checkAutoPause() {
+  const fresh = sim.newIncidents;
+  const factory = fresh.find((i) => i.kind === 'factory');
+  if (factory) {
+    pauseGame(`Factory breakdown on day ${sim.day}: pay €${FACTORY_REPAIR.cost.toLocaleString('en-IE')} to repair it in ${FACTORY_REPAIR.paidDays} day, or wait ${FACTORY_REPAIR.unpaidDays} days`);
+    selectStage('factory');
+    return;
+  }
+  if (!autoPause) return;
+  const reasons = fresh.map((i) => describeIncident(i, (id) => sim.stage(id).name));
+  if (sim.daysInDebt === 1) reasons.push(`cash is below €0 (${BANKRUPT_DAYS} days in debt = bankrupt)`);
+  if (reasons.length) pauseGame(`Day ${sim.day}: ${reasons.join(' · ')}`);
 }
 
 function render() {
@@ -137,7 +184,7 @@ function showSummary() {
   };
   const stars = [1, 2, 3].map((n) => `<span class="${n <= sim.stars ? 'on' : ''}">★</span>`).join('');
   const row = (label, value, plus = false) =>
-    `<dt>${label}</dt><dd class="${plus ? 'plus' : ''}">${plus ? '+' : '−'}${euro.format(value)}</dd>`;
+    `<dt>${label}</dt><dd class="${plus ? 'plus' : ''}">${value === 0 ? '' : plus ? '+' : '−'}${euro.format(value)}</dd>`;
   const ratios = sim.stages.filter((s) => !s.infinite)
     .map((s) => `${s.name} ${bullwhipRatio(sim.history, s).toFixed(1)}`).join(' · ');
 
@@ -165,13 +212,31 @@ function showSummary() {
 }
 
 function restart() {
-  loop.pause();
   loop.reset();
-  hud.setPlaying(false);
   sim = createSimulation();
   messageEl.innerHTML = '';
   if (selectedId) panel.show(sim.stage(selectedId), sim);
   render();
+  pauseGame('New game ready: press Play or Space to start');
 }
 
+// --- Start screen and tutorial ---------------------------------------------
+const tutorial = new Tutorial(document.querySelector('#tutorial'), {
+  select: selectStage,
+  tab: (tab) => panel.setTab(tab),
+  home: () => world.resetView(),
+  onClose: () => pauseGame('Press Play or Space to start the first day'),
+});
+
+const startScreen = new StartScreen(document.querySelector('#start'), {
+  onStart: ({ tutorial: withTutorial, autoPause: on }) => {
+    autoPause = on;
+    hud.setAutoPause(on);
+    startScreen.hide();
+    if (withTutorial) tutorial.start();
+    else play();
+  },
+});
+
+hud.setAutoPause(autoPause);
 render();

@@ -7,7 +7,7 @@ import { generateIncidents, FACTORY_REPAIR, SUPPLIER_DAYS_OFF, STORM_SPEED } fro
 import { UPGRADES, UPGRADE_COST } from './upgrades.js';
 
 const TRUCK_SPACING_KM = 13.5; // gap between trucks of one convoy (leaving the depot or queuing)
-const BANKRUPT_DAYS = 3;       // days in a row below €0 before the company goes bust
+export const BANKRUPT_DAYS = 3;      // days in a row below €0 before the company goes bust
 const STEPS_PER_DAY = 24;      // trucks move in fixed one-hour steps, whatever the frame rate
 export const STAR_GOALS = { two: { profit: 5000 }, three: { profit: 10000, service: 0.8 } };
 
@@ -84,7 +84,7 @@ export class Simulation {
 
   buyUpgrade(stage, key) {
     const upgrade = UPGRADES[key];
-    if (!upgrade || !upgrade.for.includes(stage.type) || stage.upgrades[key] || this.cash < UPGRADE_COST) return false;
+    if (this.isOver || !upgrade || !upgrade.for.includes(stage.type) || stage.upgrades[key] || this.cash < UPGRADE_COST) return false;
     stage.upgrades[key] = true;
     this.cash -= UPGRADE_COST;
     this.upgradeCosts += UPGRADE_COST;
@@ -141,7 +141,7 @@ export class Simulation {
 
   // Pay to get a broken factory fixed: it works again after one more day
   payRepair(incident) {
-    if (incident.kind !== 'factory' || incident.paid || incident.endDay < this.day) return false;
+    if (this.isOver || incident.kind !== 'factory' || incident.paid || incident.endDay < this.day) return false;
     incident.paid = true;
     incident.endDay = Math.min(incident.endDay, this.day + FACTORY_REPAIR.paidDays);
     this.cash -= FACTORY_REPAIR.cost;

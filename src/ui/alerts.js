@@ -1,6 +1,5 @@
 import { describeIncident, FACTORY_REPAIR, INCIDENT_ICONS } from '../sim/incidents.js';
-
-const BANKRUPT_DAYS = 3;
+import { BANKRUPT_DAYS } from '../sim/simulation.js';
 
 // List of active problems in the top-left corner of the map.
 // The factory alert has a button to pay for a fast repair.
@@ -13,14 +12,15 @@ export class Alerts {
   }
 
   update(sim) {
-    const active = sim.activeIncidents;
+    // Nothing left to react to once the game is over
+    const active = sim.isOver ? [] : sim.activeIncidents;
     // Only rebuild when something changed, so a button is not replaced while being clicked
-    const key = active.map((i) => `${i.id}:${i.endDay}:${i.paid}`).join('|') + `#${sim.daysInDebt}`;
+    const key = active.map((i) => `${i.id}:${i.endDay}:${i.paid}`).join('|') + `#${sim.isOver ? 'over' : sim.daysInDebt}`;
     if (key === this.key) return;
     this.key = key;
     this.root.innerHTML = '';
 
-    if (sim.daysInDebt > 0) {
+    if (sim.daysInDebt > 0 && !sim.isOver) {
       const left = BANKRUPT_DAYS - sim.daysInDebt;
       this.addItem('💸', 'Cash below €0',
         `Bankrupt if it is still below €0 in ${left} day${left === 1 ? '' : 's'}`, 'danger');
@@ -33,7 +33,8 @@ export class Alerts {
         : `until day ${incident.endDay}`;
       const item = this.addItem(icon, describeIncident(incident, (id) => sim.stage(id).name), until);
 
-      if (incident.target) {
+      // Only building problems can be clicked (truck outages and storms have no building)
+      if (sim.stage(incident.target)) {
         item.classList.add('clickable');
         item.addEventListener('click', () => this.onFocus(incident.target));
       }

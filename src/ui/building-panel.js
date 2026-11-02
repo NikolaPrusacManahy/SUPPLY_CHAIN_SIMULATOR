@@ -195,7 +195,7 @@ export class BuildingPanel {
       <span>Back to normal on day ${incident.endDay + 1}.</span>`;
     if (incident.kind === 'factory' && !incident.paid) {
       const btn = document.createElement('button');
-      btn.textContent = `Pay €${FACTORY_REPAIR.cost} to repair in ${FACTORY_REPAIR.paidDays} day`;
+      btn.textContent = `Pay €${FACTORY_REPAIR.cost.toLocaleString('en-IE')} to repair in ${FACTORY_REPAIR.paidDays} day`;
       btn.addEventListener('click', () => this.onRepair(incident));
       box.append(btn);
     }

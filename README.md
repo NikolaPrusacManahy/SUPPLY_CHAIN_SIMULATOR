@@ -5,6 +5,8 @@
 Game Development module project by Nikola Prusac Manahy, 2026.
 Built with Vite, Three.js and Chart.js.
 
+**Version 1.0.0** – final version, submitted on 5 November 2026.
+
 This README is the **Game Design Document (GDD)**. It describes the game as it is currently built.
 
 ---

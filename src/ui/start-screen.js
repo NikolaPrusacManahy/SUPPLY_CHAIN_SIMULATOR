@@ -1,9 +1,10 @@
 import { STAR_GOALS } from '../sim/simulation.js';
+import { DIFFICULTIES } from '../sim/difficulty.js';
 
 const eur = (n) => `€${n.toLocaleString('en-IE')}`;
 
 // Title screen shown before the first game: goal, what to watch out for, controls,
-// the auto-pause option, and a choice to start straight away or with the tutorial.
+// difficulty, the auto-pause option, and a choice to start straight away or with the tutorial.
 export class StartScreen {
   constructor(root, { onStart }) {
     this.root = root;
@@ -42,6 +43,16 @@ export class StartScreen {
           </div>
         </div>
 
+        <div class="start-difficulty">
+          <strong>Difficulty</strong>
+          <div class="difficulty-options">
+            ${Object.values(DIFFICULTIES).map((d) => `
+              <button data-level="${d.id}" class="${d.id === 'normal' ? 'active' : ''}">
+                <strong>${d.name}</strong><span>${d.summary}</span>
+              </button>`).join('')}
+          </div>
+        </div>
+
         <label class="start-option"><input type="checkbox" data-autopause checked />
           Pause automatically when something goes wrong</label>
 
@@ -51,9 +62,21 @@ export class StartScreen {
         </div>
       </div>`;
 
+    this.difficulty = 'normal';
+    const levelBtns = root.querySelectorAll('[data-level]');
+    levelBtns.forEach((btn) => btn.addEventListener('click', () => {
+      this.difficulty = btn.dataset.level;
+      levelBtns.forEach((b) => b.classList.toggle('active', b === btn));
+    }));
+
     const autoPause = root.querySelector('[data-autopause]');
-    root.querySelector('[data-start]').addEventListener('click', () => onStart({ tutorial: false, autoPause: autoPause.checked }));
-    root.querySelector('[data-tutorial]').addEventListener('click', () => onStart({ tutorial: true, autoPause: autoPause.checked }));
+    const start = (tutorial) => onStart({ tutorial, autoPause: autoPause.checked, difficulty: this.difficulty });
+    root.querySelector('[data-start]').addEventListener('click', () => start(false));
+    root.querySelector('[data-tutorial]').addEventListener('click', () => start(true));
+  }
+
+  show() {
+    this.root.hidden = false;
   }
 
   get open() {

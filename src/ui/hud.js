@@ -9,7 +9,7 @@ export class Hud {
         <span>Day <strong data-day>0</strong> / <span data-max></span></span>
         <span>Cash <strong data-cash></strong></span>
         <span>Service level <strong data-service></strong></span>
-        <span class="muted">Seed <span data-seed></span></span>
+        <span class="muted"><span data-level></span> · Seed <span data-seed></span></span>
         <span class="event" data-event></span>
       </div>
       <div class="hud-controls">
@@ -28,6 +28,7 @@ export class Hud {
     this.cashEl = root.querySelector('[data-cash]');
     this.serviceEl = root.querySelector('[data-service]');
     this.seedEl = root.querySelector('[data-seed]');
+    this.levelEl = root.querySelector('[data-level]');
     this.eventEl = root.querySelector('[data-event]');
     this.playBtn = root.querySelector('[data-play]');
 
@@ -68,6 +69,7 @@ export class Hud {
     this.cashEl.classList.toggle('negative', sim.cash < 0);
     this.serviceEl.textContent = `${Math.round(sim.serviceLevel * 100)}%`;
     this.seedEl.textContent = sim.seed;
+    this.levelEl.textContent = sim.level.name;
 
     const ev = sim.currentEvent;
     this.eventEl.title = ev ? `Customer demand ×${ev.multiplier}` : '';

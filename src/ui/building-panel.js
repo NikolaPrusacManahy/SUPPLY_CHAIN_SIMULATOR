@@ -94,7 +94,7 @@ export class BuildingPanel {
       <h3>Workers' workload</h3>
       <div class="meter"><span data-f="workbar"></span></div>
       <p class="muted"><span data-f="workload"></span> units shipped in the last 5 days.
-        Above ${stage.workLimit}, the workers take 6 days off and nothing is shipped.
+        Above ${stage.workLimit}, the workers take ${stage.daysOff} days off and nothing is shipped.
         Steady orders from the factory keep the workload down.</p>
       <p class="muted">Raw material is paid for when it leaves the supplier.</p>`;
     }

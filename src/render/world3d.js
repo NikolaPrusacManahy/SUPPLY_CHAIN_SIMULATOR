@@ -548,6 +548,8 @@ export class World3D {
       if (making > 0) text += ` · making ${making}`;
       b.labelDiv.textContent = text;
       b.labelDiv.classList.toggle('alert', shortage > 0);
+      b.labelDiv.classList.toggle('warn', shortage <= 0
+        && sim.warnings.some((w) => w.kind === 'stock' && w.target === stage.id));
       b.ring.visible = shortage > 0;
     }
   }

@@ -1,7 +1,10 @@
 import { describeIncident, FACTORY_REPAIR, INCIDENT_ICONS } from '../sim/incidents.js';
 import { BANKRUPT_DAYS } from '../sim/simulation.js';
 
-// List of active problems in the top-left corner of the map.
+const WARNING_ICONS = { event: '📅', storm: '⛈️', roadworks: '🚧', stock: '📦' };
+
+// List of active problems in the top-left corner of the map, followed by early warnings
+// ("Coming up") for things the player can still prepare for.
 // The factory alert has a button to pay for a fast repair.
 export class Alerts {
   constructor(root, { onRepair, onFocus }) {
@@ -14,8 +17,10 @@ export class Alerts {
   update(sim) {
     // Nothing left to react to once the game is over
     const active = sim.isOver ? [] : sim.activeIncidents;
+    const warnings = sim.isOver ? [] : sim.warnings;
     // Only rebuild when something changed, so a button is not replaced while being clicked
-    const key = active.map((i) => `${i.id}:${i.endDay}:${i.paid}`).join('|') + `#${sim.isOver ? 'over' : sim.daysInDebt}`;
+    const key = active.map((i) => `${i.id}:${i.endDay}:${i.paid}`).join('|') + `#${sim.isOver ? 'over' : sim.daysInDebt}#`
+      + warnings.map((w) => w.title + w.detail).join('|');
     if (key === this.key) return;
     this.key = key;
     this.root.innerHTML = '';
@@ -47,6 +52,20 @@ export class Alerts {
           this.onRepair(incident);
         });
         item.append(btn);
+      }
+    }
+
+    if (warnings.length) {
+      const heading = document.createElement('div');
+      heading.className = 'alerts-heading';
+      heading.textContent = 'Coming up';
+      this.root.append(heading);
+    }
+    for (const w of warnings) {
+      const item = this.addItem(WARNING_ICONS[w.kind], w.title, w.detail, 'warning');
+      if (w.target) {
+        item.classList.add('clickable');
+        item.addEventListener('click', () => this.onFocus(w.target));
       }
     }
   }

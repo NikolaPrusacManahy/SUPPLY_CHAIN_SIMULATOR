@@ -32,6 +32,11 @@ const STEPS = [
     show: { view: 'home' },
   },
   {
+    title: 'Coming up',
+    text: 'Some things are announced before they happen. Under "Coming up" you see storm forecasts, planned roadworks, demand events and shops that will run out soon (their label turns amber). Use that time to order more or switch trucks. Breakdowns and truck outages are never announced.',
+    show: { view: 'home' },
+  },
+  {
     title: 'Ready',
     text: 'Move with WASD, drag to rotate, scroll to zoom. Space pauses, Reports shows charts. Press Play (or Space) to start the first day. Good luck!',
     show: { view: 'home' },

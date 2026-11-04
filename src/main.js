@@ -10,6 +10,7 @@ import { Alerts } from './ui/alerts.js';
 import { StartScreen } from './ui/start-screen.js';
 import { Tutorial } from './ui/tutorial.js';
 import { describeIncident, FACTORY_REPAIR } from './sim/incidents.js';
+import { DIFFICULTIES } from './sim/difficulty.js';
 
 const euro = new Intl.NumberFormat('en-IE', {
   style: 'currency', currency: 'EUR', maximumFractionDigits: 0,
@@ -17,8 +18,10 @@ const euro = new Intl.NumberFormat('en-IE', {
 
 // A fixed seed can be given in the address bar (e.g. ?seed=42) to replay the same game
 const urlSeed = Number(new URLSearchParams(location.search).get('seed'));
+let difficulty = 'normal'; // chosen on the start screen
 const createSimulation = () => new Simulation({
   seed: urlSeed > 0 ? urlSeed : Math.floor(Math.random() * 1_000_000),
+  difficulty,
 });
 
 const messageEl = document.querySelector('#message');
@@ -82,7 +85,10 @@ const loop = new GameLoop({
       const text = d.kind === 'raw' ? `+${d.qty} raw` : d.kind === 'produced' ? `+${d.qty} made` : `+${d.qty}`;
       world.popup(d.stageId, text, d.kind);
     }
-    if (deliveries.length) panel.update(sim);
+    if (deliveries.length) {
+      panel.update(sim);
+      alerts.update(sim); // a truck arriving can clear a "runs out soon" warning
+    }
     world.render(sim, progress);
   },
 });
@@ -190,6 +196,7 @@ function showSummary() {
 
   messageEl.innerHTML = `
     <h2>${sim.bankrupt ? `Bankrupt on day ${sim.day}` : `Day ${sim.maxDays}: results`}</h2>
+    <p class="muted result-level">${sim.level.name} · seed ${sim.seed}</p>
     <div class="stars">${stars}</div>
     <div class="result-main">
       <div><span class="muted">Profit</span><strong class="${sim.profit < 0 ? 'negative' : ''}">${euro.format(sim.profit)}</strong></div>
@@ -207,8 +214,16 @@ function showSummary() {
     <p class="muted goals">★ survive 60 days · ★★ €${STAR_GOALS.two.profit.toLocaleString('en-IE')} profit ·
       ★★★ €${STAR_GOALS.three.profit.toLocaleString('en-IE')} profit and ${STAR_GOALS.three.service * 100}% service</p>
     <p class="muted goals">Bullwhip ratio (1.0 = orders as steady as demand): ${ratios}</p>
-    <button data-again>Play again</button>`;
+    <div class="result-buttons">
+      <button class="primary" data-again>Play again</button>
+      <button data-menu>Change difficulty</button>
+    </div>`;
   messageEl.querySelector('[data-again]').addEventListener('click', restart);
+  messageEl.querySelector('[data-menu]').addEventListener('click', () => {
+    messageEl.innerHTML = '';
+    pauseBanner.hidden = true;
+    startScreen.show();
+  });
 }
 
 function restart() {
@@ -229,10 +244,17 @@ const tutorial = new Tutorial(document.querySelector('#tutorial'), {
 });
 
 const startScreen = new StartScreen(document.querySelector('#start'), {
-  onStart: ({ tutorial: withTutorial, autoPause: on }) => {
+  onStart: ({ tutorial: withTutorial, autoPause: on, difficulty: level }) => {
     autoPause = on;
     hud.setAutoPause(on);
     startScreen.hide();
+    // The game behind the start screen was made on Normal: start a fresh one on the chosen level
+    difficulty = level;
+    loop.reset();
+    sim = createSimulation();
+    messageEl.innerHTML = '';
+    selectStage(null);
+    render();
     if (withTutorial) tutorial.start();
     else play();
   },

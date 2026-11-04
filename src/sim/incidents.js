@@ -3,7 +3,6 @@ import { TRUCK_TYPES } from './trucks.js';
 // Things that go wrong during a game. They are generated from the game seed,
 // so the same seed always brings the same troubles.
 export const FACTORY_REPAIR = { cost: 2000, paidDays: 1, unpaidDays: 10 };
-export const SUPPLIER_DAYS_OFF = 6;     // when the supplier's workers are overworked
 export const ROADWORKS_DAYS = 7;
 export const STORM_SPEED = 0.5;         // trucks drive at half speed in a storm
 
@@ -14,38 +13,43 @@ function spreadDays(rng, maxDays, count, length) {
   return Array.from({ length: count }, (_, i) => first + i * slot + Math.floor(rng() * Math.max(1, slot - length)));
 }
 
+// How many of each problem a game has (Normal difficulty)
+export const DEFAULT_INCIDENTS = { supplier: 2, factory: 2, trucks: 2, storm: 2, roadworks: 1 };
+
 // routes: stage ids that have a road from their upstream building
-export function generateIncidents(rng, maxDays, routes) {
+// counts: how many of each problem (set by the difficulty)
+export function generateIncidents(rng, maxDays, routes, counts = DEFAULT_INCIDENTS) {
   const incidents = [];
   let id = 0;
 
-  for (const start of spreadDays(rng, maxDays, 2, 3)) {
+  for (const start of spreadDays(rng, maxDays, counts.supplier, 3)) {
     const days = 1 + Math.floor(rng() * 3); // repaired by itself in 1-3 days
     incidents.push({ id: id++, kind: 'supplier', target: 'supplier', startDay: start, endDay: start + days - 1 });
   }
 
-  for (const start of spreadDays(rng, maxDays, 2, FACTORY_REPAIR.unpaidDays)) {
+  for (const start of spreadDays(rng, maxDays, counts.factory, FACTORY_REPAIR.unpaidDays)) {
     incidents.push({ id: id++, kind: 'factory', target: 'factory', startDay: start,
                      endDay: start + FACTORY_REPAIR.unpaidDays - 1, paid: false });
   }
 
   const types = Object.keys(TRUCK_TYPES);
-  for (const start of spreadDays(rng, maxDays, 2, 9)) {
+  for (const start of spreadDays(rng, maxDays, counts.trucks, 9)) {
     const truck = types[Math.floor(rng() * types.length)];
     const days = 7 + Math.floor(rng() * 3); // out of service for 7-9 days
     incidents.push({ id: id++, kind: 'trucks', target: truck, startDay: start, endDay: start + days - 1 });
   }
 
-  for (const start of spreadDays(rng, maxDays, 2, 3)) {
+  for (const start of spreadDays(rng, maxDays, counts.storm, 3)) {
     const days = 2 + Math.floor(rng() * 2); // storms last 2-3 days
     incidents.push({ id: id++, kind: 'storm', target: null, startDay: start, endDay: start + days - 1 });
   }
 
-  // Roadworks: rare, once per game, somewhere in the middle of one road
-  const [start] = spreadDays(rng, maxDays, 1, ROADWORKS_DAYS);
-  const route = routes[Math.floor(rng() * routes.length)];
-  incidents.push({ id: id++, kind: 'roadworks', target: route, at: 0.35 + rng() * 0.3,
-                   startDay: start, endDay: start + ROADWORKS_DAYS - 1 });
+  // Roadworks: rare (once per game on Normal), somewhere in the middle of one road
+  for (const start of spreadDays(rng, maxDays, counts.roadworks, ROADWORKS_DAYS)) {
+    const route = routes[Math.floor(rng() * routes.length)];
+    incidents.push({ id: id++, kind: 'roadworks', target: route, at: 0.35 + rng() * 0.3,
+                     startDay: start, endDay: start + ROADWORKS_DAYS - 1 });
+  }
 
   return incidents.sort((a, b) => a.startDay - b.startDay);
 }

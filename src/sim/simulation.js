@@ -3,8 +3,10 @@ import { generateEvents } from './events.js';
 import { Stage } from './stage.js';
 import { NODES, KM_PER_UNIT, routeLength } from './network.js';
 import { TRUCK_TYPES } from './trucks.js';
-import { generateIncidents, FACTORY_REPAIR, SUPPLIER_DAYS_OFF, STORM_SPEED } from './incidents.js';
+import { generateIncidents, FACTORY_REPAIR, STORM_SPEED } from './incidents.js';
 import { UPGRADES, UPGRADE_COST } from './upgrades.js';
+import { DIFFICULTIES } from './difficulty.js';
+import { upcomingWarnings } from './warnings.js';
 
 const TRUCK_SPACING_KM = 13.5; // gap between trucks of one convoy (leaving the depot or queuing)
 export const BANKRUPT_DAYS = 3;      // days in a row below €0 before the company goes bust
@@ -12,9 +14,11 @@ const STEPS_PER_DAY = 24;      // trucks move in fixed one-hour steps, whatever 
 export const STAR_GOALS = { two: { profit: 5000 }, three: { profit: 10000, service: 0.8 } };
 
 export class Simulation {
-  constructor({ nodes = NODES, seed = 1, startCash = 12000, salePrice = 30, rawCost = 8,
+  constructor({ nodes = NODES, seed = 1, difficulty = 'normal', startCash, salePrice = 30, rawCost = 8,
                 demandSpread = 0.4, maxDays = 60 } = {}) {
-    Object.assign(this, { seed, startCash, salePrice, rawCost, demandSpread, maxDays });
+    const level = DIFFICULTIES[difficulty] ?? DIFFICULTIES.normal;
+    startCash ??= level.startCash;
+    Object.assign(this, { seed, level, startCash, salePrice, rawCost, demandSpread, maxDays });
 
     this.stages = nodes.map((n) => new Stage({
       ...n,
@@ -29,6 +33,8 @@ export class Simulation {
     }
     this.shops = this.stages.filter((s) => s.type === 'shop');
     this.supplier = this.stages.find((s) => s.infinite);
+    this.supplier.workLimitFactor = level.workLimit;
+    this.supplier.daysOff = level.daysOff;
 
     // Each day is processed from the shops back to the supplier,
     // so an order placed today can be shipped by the building upstream today.
@@ -41,7 +47,7 @@ export class Simulation {
     this.events = generateEvents(this.rng, maxDays);
     // Separate random stream, so incidents never change the customer demand of a seed
     const routes = this.stages.filter((s) => s.upstream).map((s) => s.id);
-    this.incidents = generateIncidents(createRng(seed ^ 0x5bd1e995), maxDays, routes);
+    this.incidents = generateIncidents(createRng(seed ^ 0x5bd1e995), maxDays, routes, level.incidents);
     this.nextIncidentId = this.incidents.length;
     this.repairCosts = 0;
     this.upgradeCosts = 0;
@@ -107,6 +113,16 @@ export class Simulation {
 
   get currentEvent() {
     return this.eventOn(this.day);
+  }
+
+  // Early warnings for the alerts list and the shop labels (worked out once per game hour)
+  get warnings() {
+    const key = `${this.day}:${this.hour}`;
+    if (this.warningsKey !== key) {
+      this.warningsKey = key;
+      this.warningsList = upcomingWarnings(this, this.level.warnDays);
+    }
+    return this.warningsList;
   }
 
   incidentsOn(day) {
@@ -246,7 +262,7 @@ export class Simulation {
     const sup = this.supplier;
     if (sup.workload <= sup.workLimit || this.isBroken(sup.id, day + 1)) return;
     this.incidents.push({ id: this.nextIncidentId++, kind: 'overworked', target: sup.id,
-                          startDay: day + 1, endDay: day + SUPPLIER_DAYS_OFF });
+                          startDay: day + 1, endDay: day + sup.daysOff });
     sup.recentShipped = [];
   }
 

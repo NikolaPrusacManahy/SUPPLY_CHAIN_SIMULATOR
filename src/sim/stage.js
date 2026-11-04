@@ -41,6 +41,8 @@ export class Stage {
     this.lastLost = 0;
     this.lastDemand = 0;
     this.totalCost = 0;     // holding + shortage
+    this.workLimitFactor = 1; // set by the difficulty (supplier only)
+    this.daysOff = 6;         // days off when overworked, set by the difficulty (supplier only)
     this.transportCost = 0; // trips paid for deliveries to this building
   }
 
@@ -62,7 +64,7 @@ export class Stage {
 
   // Supplier: units it can ship in 5 days before the workers need days off
   get workLimit() {
-    return SUPPLIER_WORK_LIMIT * (this.upgrades.workers ? 1.5 : 1);
+    return Math.round(SUPPLIER_WORK_LIMIT * this.workLimitFactor * (this.upgrades.workers ? 1.5 : 1));
   }
 
   get workload() {
